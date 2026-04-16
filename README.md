@@ -71,6 +71,27 @@ Output:
 - `rows_written`: Total rows written to sheet (including headers, section totals, summary)
 - `unlinked_transactions`: Count of transactions without a profile_id (orphaned transactions)
 
+### Diagnostic: List Unlinked Transactions
+
+List all unlinked (orphaned) transactions for a month:
+
+```bash
+python sync_entity_budget.py unlinked month=2026-02
+```
+
+Output:
+```
+Unlinked Transactions for 2026-02:
+Date         Amount Type     Category             ID
+------
+2026-02-15   $150.00 expense Office Supplies      xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+```
+
+Use the transaction ID to trace the transaction in your Supabase database and either:
+- Link it to a profile (set the `profile_id` field)
+- Delete it if it's an error
+- Update or investigate why it's orphaned
+
 ### Handling Unlinked Transactions
 
 If `unlinked_transactions` is greater than 0, it means there are transactions in your Supabase database that are not linked to any profile. These transactions are:
