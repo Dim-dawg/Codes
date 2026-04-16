@@ -1,0 +1,584 @@
+/**
+ * ============================================================
+ * dataService.gs - Budget Assistant (PROFILES-DRIVEN)
+ *
+ * PRIMARY ENTITY: Profiles (Google Sheets rows)
+ * CLASSIFICATION: Categories (via default_category_id)
+ *
+ * Uses the linked Google Sheet as the profile source of truth.
+ * Supabase is still used for transactions, budgets, and goals.
+ * ============================================================
+ */
+
+const DS = {
+  URL_KEY: 'SUPABASE_URL',
+  ANON_KEY: 'SUPABASE_ANON_KEY',
+  USER_ID_KEY: 'SUPABASE_USER_ID',
+  PROFILES_SPREADSHEET_ID: '12whNTZGeGDCT5rWcLKsWcyQ8HTs71JRNrfpe-7h3ezE',
+  PROFILES_SHEET_GID: 886933544,
+};
+
+/**
+ * Retrieves Supabase credentials from User Properties.
+ * @returns {Object|null} {url, anonKey, userId} or null
+ */
+function getSupabaseCredentials_() {
+  const props = PropertiesService.getUserProperties();
+  const url = props.getProperty(DS.URL_KEY);
+  const anonKey = props.getProperty(DS.ANON_KEY);
+  const userId = props.getProperty(DS.USER_ID_KEY);
+
+  if (!url || !anonKey || !userId) {
+    console.log('Missing Supabase credentials');
+    return null;
+  }
+
+  console.log('Credentials loaded');
+  return { url, anonKey, userId };
+}
+
+/**
+ * Sets Supabase credentials (called from UI prompt).
+ */
+function setSupabaseCredentials(url, anonKey, userId) {
+  const props = PropertiesService.getUserProperties();
+  props.setProperty(DS.URL_KEY, url);
+  props.setProperty(DS.ANON_KEY, anonKey);
+  props.setProperty(DS.USER_ID_KEY, userId);
+  console.log('Credentials saved');
+}
+
+/**
+ * Opens the linked spreadsheet tab that contains the user's profile records.
+ * @returns {GoogleAppsScript.Spreadsheet.Sheet}
+ */
+function getLinkedProfilesSheet_() {
+  const ss = SpreadsheetApp.openById(DS.PROFILES_SPREADSHEET_ID);
+  const sheet = ss.getSheets().find(s => String(s.getSheetId()) === String(DS.PROFILES_SHEET_GID));
+
+  if (!sheet) {
+    throw new Error(`Linked profiles sheet not found for gid ${DS.PROFILES_SHEET_GID}.`);
+  }
+
+  return sheet;
+}
+
+function normalizeHeader_(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function buildHeaderMap_(headers) {
+  const map = {};
+  headers.forEach((header, index) => {
+    const key = normalizeHeader_(header);
+    if (key && map[key] == null) {
+      map[key] = index;
+    }
+  });
+  return map;
+}
+
+function getFirstValue_(row, headerMap, keys, fallback) {
+  for (let i = 0; i < keys.length; i++) {
+    const index = headerMap[keys[i]];
+    if (index == null) continue;
+
+    const value = row[index];
+    if (value !== '' && value != null) {
+      return value;
+    }
+  }
+  return fallback;
+}
+
+function isTruthyFlag_(value, defaultValue) {
+  if (value === '' || value == null) {
+    return defaultValue;
+  }
+
+  const normalized = String(value).trim().toLowerCase();
+  if (['false', '0', 'no', 'n', 'inactive', 'hidden', 'off'].includes(normalized)) return false;
+  if (['true', '1', 'yes', 'y', 'active', 'visible', 'on'].includes(normalized)) return true;
+
+  return defaultValue;
+}
+
+function normalizeAccountType_(value) {
+  const raw = String(value || '').trim().toUpperCase();
+
+  if (!raw) return 'EXPENSE';
+  if (['INCOME', 'REVENUE', 'EARNING', 'EARNINGS'].includes(raw)) return 'INCOME';
+  if (['SAVINGS', 'SAVING', 'GOAL', 'GOALS', 'INVESTMENT', 'INVESTMENTS'].includes(raw)) return 'SAVINGS';
+  return 'EXPENSE';
+}
+
+/**
+ * Generic Supabase fetch wrapper.
+ * @param {string} table
+ * @param {string} queryParams
+ * @param {string} method
+ * @param {Object|null} body
+ * @returns {Array}
+ */
+function supabaseFetch_(table, queryParams, method, body) {
+  const creds = getSupabaseCredentials_();
+  if (!creds) throw new Error('Supabase not configured.');
+
+  const safeQueryParams = queryParams || '';
+  const safeMethod = method || 'GET';
+  const safeBody = body || null;
+  const endpoint = `${creds.url}/rest/v1/${table}${safeQueryParams}`;
+
+  console.log(`${safeMethod} ${endpoint}`);
+
+  const options = {
+    method: safeMethod.toLowerCase(),
+    headers: {
+      apikey: creds.anonKey,
+      Authorization: `Bearer ${creds.anonKey}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=representation',
+    },
+    muteHttpExceptions: true,
+  };
+
+  if (safeBody) {
+    options.payload = JSON.stringify(safeBody);
+    console.log(`Payload: ${JSON.stringify(safeBody)}`);
+  }
+
+  const res = UrlFetchApp.fetch(endpoint, options);
+  const code = res.getResponseCode();
+  const text = res.getContentText();
+
+  console.log(`Status: ${code}`);
+
+  if (code < 200 || code >= 300) {
+    console.log(`Error: ${text}`);
+    throw new Error(`Supabase error (${code}): ${text}`);
+  }
+
+  const parsed = text ? JSON.parse(text) : [];
+  console.log(`Rows returned: ${parsed.length}`);
+  return parsed;
+}
+
+/**
+ * Fetches all profiles from the linked Google Sheet.
+ * Only visible rows are returned, so downstream sheets only show the user's profiles.
+ * @returns {Array}
+ */
+function getProfiles() {
+  console.log('Fetching profiles from linked spreadsheet...');
+
+  const sheet = getLinkedProfilesSheet_();
+  const values = sheet.getDataRange().getValues();
+
+  if (values.length < 2) {
+    console.log('Linked profile sheet is empty');
+    return [];
+  }
+
+  const headers = values[0];
+  const headerMap = buildHeaderMap_(headers);
+
+  const mapped = values
+    .slice(1)
+    .map((row, index) => {
+      const name = String(getFirstValue_(row, headerMap, [
+        'name', 'profile', 'profile_name', 'account', 'account_name'
+      ], '')).trim();
+
+      const includeFlag = getFirstValue_(row, headerMap, [
+        'show', 'visible', 'is_visible', 'include', 'is_active', 'active', 'enabled', 'status'
+      ], '');
+
+      if (!name || !isTruthyFlag_(includeFlag, true)) {
+        return null;
+      }
+
+      return {
+        id: String(getFirstValue_(row, headerMap, [
+          'id', 'profile_id', 'uuid', 'record_id'
+        ], `sheet-row-${index + 2}`)).trim(),
+        name,
+        default_category_id: String(getFirstValue_(row, headerMap, [
+          'default_category_id', 'category_id', 'default_category', 'category'
+        ], '')).trim(),
+        account_type: normalizeAccountType_(getFirstValue_(row, headerMap, [
+          'account_type', 'type', 'category_type', 'group', 'section'
+        ], 'EXPENSE')),
+        platform: String(getFirstValue_(row, headerMap, [
+          'platform', 'network', 'channel', 'site'
+        ], '')).trim(),
+        handle: String(getFirstValue_(row, headerMap, [
+          'handle', 'username', 'user_name', 'profile_handle'
+        ], '')).trim(),
+        url: String(getFirstValue_(row, headerMap, [
+          'url', 'link', 'profile_url', 'href'
+        ], '')).trim(),
+        raw: headers.reduce((acc, header, colIndex) => {
+          acc[String(header || `Column ${colIndex + 1}`)] = row[colIndex];
+          return acc;
+        }, {})
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  console.log(`${mapped.length} profiles loaded from spreadsheet`);
+  if (mapped.length > 0) {
+    console.log(`Sample: ${JSON.stringify(mapped[0])}`);
+  }
+
+  return mapped;
+}
+
+/**
+ * Creates profile-to-ID map {profileName: profileId}.
+ */
+function getProfileMap() {
+  const profiles = getProfiles();
+  const map = {};
+  profiles.forEach(p => {
+    map[p.name] = p.id;
+  });
+  return map;
+}
+
+/**
+ * Creates profile-to-accountType map {profileId: accountType}.
+ */
+function getProfileTypeMap() {
+  const profiles = getProfiles();
+  const map = {};
+  profiles.forEach(p => {
+    map[p.id] = p.account_type;
+  });
+  return map;
+}
+
+/**
+ * Fetches transactions for a given month (YYYY-MM format).
+ * @param {string} monthYear
+ * @returns {Array}
+ */
+function getTransactionsByMonth(monthYear) {
+  const creds = getSupabaseCredentials_();
+  if (!creds) return [];
+
+  console.log(`Fetching transactions for ${monthYear}`);
+
+  const [year, month] = monthYear.split('-').map(Number);
+  const startDate = `${monthYear}-01`;
+  const endDate = new Date(year, month, 0);
+  const endDateStr = Utilities.formatDate(endDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+
+  const result = supabaseFetch_(
+    'transactions',
+    `?user_id=eq.${creds.userId}&date=gte.${startDate}&date=lte.${endDateStr}&select=id,date,description,amount,type,profile_id,category_id&order=date.asc`,
+    'GET',
+    null
+  );
+
+  console.log(`${result.length} transactions loaded`);
+  return result;
+}
+
+/**
+ * Fetches all transactions for a profile.
+ * @param {string} profileId
+ * @returns {Array}
+ */
+function getTransactionsByProfile(profileId) {
+  const creds = getSupabaseCredentials_();
+  if (!creds) return [];
+
+  console.log(`Fetching transactions for profile ${profileId}`);
+
+  const result = supabaseFetch_(
+    'transactions',
+    `?user_id=eq.${creds.userId}&profile_id=eq.${profileId}&select=id,date,description,amount,type&order=date.desc&limit=50`,
+    'GET',
+    null
+  );
+
+  console.log(`${result.length} transactions loaded`);
+  return result;
+}
+
+/**
+ * Creates transaction {profileId: [{...}, {...}]} map.
+ */
+function getTransactionsByProfileMap(monthYear) {
+  const txns = getTransactionsByMonth(monthYear);
+  const map = {};
+
+  txns.forEach(t => {
+    if (!map[t.profile_id]) map[t.profile_id] = [];
+    map[t.profile_id].push(t);
+  });
+
+  console.log(`Transactions grouped by ${Object.keys(map).length} profiles`);
+  return map;
+}
+
+/**
+ * Fetches budgets for a given month.
+ * @param {string} monthYear
+ * @returns {Array}
+ */
+function getBudgetsByMonth(monthYear) {
+  const creds = getSupabaseCredentials_();
+  if (!creds) return [];
+
+  console.log(`Fetching budgets for ${monthYear}`);
+
+  const result = supabaseFetch_(
+    'budgets',
+    `?user_id=eq.${creds.userId}&month=eq.${monthYear}&select=category_id,amount`,
+    'GET',
+    null
+  );
+
+  console.log(`${result.length} budgets loaded`);
+  return result;
+}
+
+/**
+ * Fetches all goals for user.
+ * @returns {Array}
+ */
+function getGoals() {
+  const creds = getSupabaseCredentials_();
+  if (!creds) return [];
+
+  console.log('Fetching goals...');
+
+  const result = supabaseFetch_(
+    'goals',
+    `?user_id=eq.${creds.userId}&select=id,name,target_amount,current_amount&order=name.asc`,
+    'GET',
+    null
+  );
+
+  console.log(`${result.length} goals loaded`);
+  return result;
+}
+
+/**
+ * Maps profile names to planned budget amounts.
+ */
+function buildBudgetMap(monthYear) {
+  console.log('Building budget map...');
+
+  const budgets = getBudgetsByMonth(monthYear);
+  const profiles = getProfiles();
+  const categoryBudgetMap = {};
+
+  budgets.forEach(b => {
+    categoryBudgetMap[b.category_id] = Number(b.amount) || 0;
+  });
+
+  const result = {};
+  profiles.forEach(p => {
+    result[p.name] = categoryBudgetMap[p.default_category_id] || 0;
+  });
+
+  console.log(`Budget map: ${JSON.stringify(result)}`);
+  return result;
+}
+
+/**
+ * Maps profile names to actual spending.
+ */
+function buildActualMap(monthYear) {
+  console.log('Building actual map...');
+
+  const txns = getTransactionsByMonth(monthYear);
+  const profiles = getProfiles();
+  const profileMap = {};
+
+  profiles.forEach(p => {
+    profileMap[p.id] = p.name;
+  });
+
+  const result = {};
+  let skipped = 0;
+
+  txns.forEach(t => {
+    const profileName = profileMap[t.profile_id];
+    if (!profileName) {
+      skipped++;
+      return;
+    }
+
+    const amt = Math.abs(Number(t.amount) || 0);
+    result[profileName] = (result[profileName] || 0) + amt;
+  });
+
+  console.log(`Actual map built (skipped ${skipped})`);
+  console.log(`Actuals: ${JSON.stringify(result)}`);
+  return result;
+}
+
+/**
+ * Builds profile ID to row number mapping.
+ */
+function buildProfileRowMap(sheet, startRow) {
+  const profiles = getProfiles();
+  const map = {};
+  let currentRow = startRow == null ? 4 : startRow;
+
+  profiles.forEach(p => {
+    map[p.id] = {
+      row: currentRow,
+      name: p.name,
+      accountType: p.account_type
+    };
+    currentRow++;
+  });
+
+  console.log(`Profile row map: ${JSON.stringify(map)}`);
+  return map;
+}
+
+/**
+ * Syncs Transaction Log sheet with Supabase data.
+ */
+function syncTransactionLogSheet(monthYear) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName('Transaction Log');
+
+  if (!sheet) {
+    sheet = ss.insertSheet('Transaction Log');
+  }
+
+  console.log(`Syncing transaction log for ${monthYear}`);
+
+  const txns = getTransactionsByMonth(monthYear);
+  const profiles = getProfiles();
+  const profileMap = {};
+
+  profiles.forEach(p => {
+    profileMap[p.id] = p.name;
+  });
+
+  const rows = txns
+    .filter(t => profileMap[t.profile_id])
+    .map(t => [
+      t.date.split('T')[0],
+      t.description,
+      profileMap[t.profile_id],
+      t.category || '',
+      t.amount,
+      t.type
+    ]);
+
+  sheet.clear();
+  sheet.getRange(1, 1, 1, 6)
+    .setValues([['Date', 'Description', 'Profile', 'Category', 'Amount', 'Type']])
+    .setFontWeight('bold')
+    .setBackground('#4361ee')
+    .setFontColor('#ffffff');
+
+  if (rows.length) {
+    sheet.getRange(2, 1, rows.length, 6).setValues(rows);
+    sheet.getRange(2, 5, rows.length, 1).setNumberFormat('$#,##0.00;$(#,##0.00)');
+  }
+
+  sheet.setFrozenRows(1);
+  sheet.autoResizeColumns(1, 6);
+  console.log(`Synced ${rows.length} rows`);
+}
+
+/**
+ * Syncs Profile Summary sheet with linked spreadsheet data.
+ */
+function syncProfileSummarySheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName('Profile Summary');
+
+  if (!sheet) {
+    sheet = ss.insertSheet('Profile Summary');
+  }
+
+  console.log('Syncing profile summary...');
+
+  const profiles = getProfiles();
+  const hasPlatform = profiles.some(p => p.platform);
+  const hasHandle = profiles.some(p => p.handle);
+  const hasUrl = profiles.some(p => p.url);
+
+  const headers = ['Profile Name', 'Account Type'];
+  if (hasPlatform) headers.push('Platform');
+  if (hasHandle) headers.push('Handle');
+  if (hasUrl) headers.push('Profile URL');
+  headers.push('Last Updated');
+
+  const now = new Date().toLocaleString();
+  const rows = profiles.map(p => {
+    const row = [p.name, p.account_type];
+    if (hasPlatform) row.push(p.platform || '');
+    if (hasHandle) row.push(p.handle || '');
+    if (hasUrl) row.push(p.url || '');
+    row.push(now);
+    return row;
+  });
+
+  sheet.clear();
+  sheet.getRange(1, 1, 1, headers.length)
+    .setValues([headers])
+    .setFontWeight('bold')
+    .setBackground('#06d6a0')
+    .setFontColor('#ffffff');
+
+  if (rows.length) {
+    sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
+  }
+
+  sheet.setFrozenRows(1);
+  sheet.autoResizeColumns(1, headers.length);
+  console.log(`Synced ${rows.length} profiles`);
+}
+
+/**
+ * Gets month in YYYY-MM format.
+ * @param {number} monthOffset
+ * @returns {string}
+ */
+function getMonthYear(monthOffset) {
+  const safeOffset = monthOffset || 0;
+  const date = new Date();
+  date.setMonth(date.getMonth() + safeOffset);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+}
+
+/**
+ * Validates YYYY-MM format.
+ * @param {string} str
+ * @returns {boolean}
+ */
+function isValidMonthYear(str) {
+  return /^\d{4}-\d{2}$/.test(str);
+}
+
+/**
+ * Logs data sample for debugging.
+ * @param {*} data
+ * @param {string} label
+ */
+function logSample(data, label) {
+  const safeLabel = label || 'Data';
+  if (Array.isArray(data) && data.length > 0) {
+    console.log(`${safeLabel}: ${JSON.stringify(data.slice(0, 2))}`);
+  } else {
+    console.log(`${safeLabel}: ${JSON.stringify(data)}`);
+  }
+}

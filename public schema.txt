@@ -1,0 +1,161 @@
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
+
+CREATE TABLE public.accounts (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid DEFAULT auth.uid(),
+  name character varying NOT NULL,
+  type character varying NOT NULL DEFAULT 'CHECKING'::character varying CHECK (type::text = ANY (ARRAY['CHECKING'::character varying, 'SAVINGS'::character varying, 'CREDIT_CARD'::character varying, 'LOAN'::character varying, 'CASH'::character varying, 'INVESTMENT'::character varying]::text[])),
+  opening_balance numeric DEFAULT 0,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT accounts_pkey PRIMARY KEY (id),
+  CONSTRAINT accounts_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.balance_sheet_adjustments (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid DEFAULT auth.uid(),
+  name character varying NOT NULL,
+  amount numeric NOT NULL,
+  type character varying NOT NULL CHECK (type::text = ANY (ARRAY['ASSET'::character varying, 'LIABILITY'::character varying]::text[])),
+  description text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT balance_sheet_adjustments_pkey PRIMARY KEY (id),
+  CONSTRAINT balance_sheet_adjustments_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.budgets (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid DEFAULT auth.uid(),
+  category_id uuid,
+  month character varying NOT NULL,
+  amount numeric NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT budgets_pkey PRIMARY KEY (id),
+  CONSTRAINT budgets_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT budgets_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.categories(id)
+);
+CREATE TABLE public.categories (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  user_id uuid DEFAULT auth.uid(),
+  account_type text,
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT categories_pkey PRIMARY KEY (id),
+  CONSTRAINT categories_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.chat_context (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid,
+  session_id uuid,
+  message text NOT NULL,
+  response text,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT chat_context_pkey PRIMARY KEY (id),
+  CONSTRAINT chat_context_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.financial_reports (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid DEFAULT auth.uid(),
+  business_name character varying NOT NULL,
+  report_type character varying NOT NULL CHECK (report_type::text = ANY (ARRAY['profit_loss'::character varying, 'balance_sheet'::character varying, 'cash_flow'::character varying]::text[])),
+  period character varying,
+  as_of_date date,
+  data jsonb NOT NULL,
+  generated_at timestamp with time zone DEFAULT now(),
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT financial_reports_pkey PRIMARY KEY (id),
+  CONSTRAINT financial_reports_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.goals (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid DEFAULT auth.uid(),
+  name character varying NOT NULL,
+  target_amount numeric NOT NULL,
+  current_amount numeric DEFAULT 0,
+  due_date date,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT goals_pkey PRIMARY KEY (id),
+  CONSTRAINT goals_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.profiles (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  created_at timestamp with time zone DEFAULT now(),
+  name text,
+  type text,
+  address text,
+  notes text,
+  description text,
+  tags ARRAY DEFAULT ARRAY[]::text[],
+  keyword_match text,
+  default_category_id uuid,
+  user_id uuid DEFAULT auth.uid(),
+  updated_at timestamp with time zone DEFAULT now(),
+  keywords ARRAY DEFAULT ARRAY[]::text[],
+  exclude_keywords ARRAY,
+  CONSTRAINT profiles_pkey PRIMARY KEY (id),
+  CONSTRAINT profiles_default_category_id_fkey FOREIGN KEY (default_category_id) REFERENCES public.categories(id),
+  CONSTRAINT profiles_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.reclassification_proposals (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  transaction_id uuid,
+  current_category_id uuid,
+  current_category text,
+  proposed_category_id uuid,
+  proposed_category text,
+  rule_keyword text,
+  confidence double precision,
+  strong_match boolean DEFAULT false,
+  reason text,
+  status text DEFAULT 'PENDING'::text,
+  user_id uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT reclassification_proposals_pkey PRIMARY KEY (id),
+  CONSTRAINT reclassification_proposals_transaction_id_fkey FOREIGN KEY (transaction_id) REFERENCES public.transactions(id),
+  CONSTRAINT reclassification_proposals_current_category_id_fkey FOREIGN KEY (current_category_id) REFERENCES public.categories(id),
+  CONSTRAINT reclassification_proposals_proposed_category_id_fkey FOREIGN KEY (proposed_category_id) REFERENCES public.categories(id),
+  CONSTRAINT reclassification_proposals_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.rules (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  created_at timestamp with time zone DEFAULT now(),
+  keyword text NOT NULL,
+  target_category_id uuid NOT NULL,
+  user_id uuid DEFAULT auth.uid(),
+  target_category uuid,
+  target_type text,
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT rules_pkey PRIMARY KEY (id),
+  CONSTRAINT rules_category_fkey FOREIGN KEY (target_category_id) REFERENCES public.categories(id),
+  CONSTRAINT rules_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.transactions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  created_at timestamp with time zone DEFAULT now(),
+  date date NOT NULL,
+  description text NOT NULL,
+  amount numeric NOT NULL,
+  type text NOT NULL CHECK (type = ANY (ARRAY['income'::text, 'expense'::text])),
+  category_id uuid NOT NULL,
+  profile_id uuid,
+  original_description text,
+  document_id text,
+  user_id uuid DEFAULT auth.uid(),
+  category character varying,
+  account_id uuid,
+  is_recurring boolean DEFAULT false,
+  recurring_group character varying,
+  updated_at timestamp with time zone DEFAULT now(),
+  debit_amount numeric NOT NULL DEFAULT 0,
+  credit_amount numeric NOT NULL DEFAULT 0,
+  status text NOT NULL DEFAULT 'posted'::text,
+  CONSTRAINT transactions_pkey PRIMARY KEY (id),
+  CONSTRAINT transactions_category_fkey FOREIGN KEY (category_id) REFERENCES public.categories(id),
+  CONSTRAINT transactions_profile_fkey FOREIGN KEY (profile_id) REFERENCES public.profiles(id),
+  CONSTRAINT transactions_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT transactions_account_id_fkey FOREIGN KEY (account_id) REFERENCES public.accounts(id)
+);

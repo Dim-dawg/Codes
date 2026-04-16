@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cipher Money</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
+
+  <style>
+    /* ── Reset & Base ─────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #09090e;
+      --bg-2:      #111118;
+      --bg-3:      #18181f;
+      --bg-4:      #1f1f28;
+      --border:    rgba(255,255,255,0.07);
+      --border-md: rgba(255,255,255,0.12);
+      --teal:      #00d4aa;
+      --teal-dim:  rgba(0, 212, 170, 0.12);
+      --teal-glow: rgba(0, 212, 170, 0.25);
+      --amber:     #f0a72b;
+      --red:       #ff5757;
+      --green:     #22d36b;
+      --text-1:    #f0f0f8;
+      --text-2:    #8b8b9e;
+      --text-3:    #55556a;
+      --font-head: 'Syne', sans-serif;
+      --font-mono: 'DM Mono', monospace;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text-1);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      overflow: hidden;
+    }
+
+    /* ── Layout ───────────────────────────────── */
+    .shell {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      position: relative;
+    }
+
+    /* ── Header ───────────────────────────────── */
+    .header {
+      padding: 14px 14px 10px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-2);
+      flex-shrink: 0;
+    }
+
+    .header-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .logo-mark {
+      width: 28px;
+      height: 28px;
+      background: var(--teal);
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .logo-mark svg {
+      width: 15px;
+      height: 15px;
+      fill: var(--bg);
+    }
+
+    .logo-text {
+      font-family: var(--font-head);
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: -0.3px;
+      color: var(--text-1);
+    }
+
+    .logo-text span {
+      color: var(--teal);
+    }
+
+    .month-badge {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--teal);
+      background: var(--teal-dim);
+      border: 1px solid rgba(0,212,170,0.2);
+      border-radius: 5px;
+      padding: 3px 8px;
+      letter-spacing: 0.5px;
+    }
+
+    /* ── Stats row ────────────────────────────── */
+    .stats-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 6px;
+    }
+
+    .stat-card {
+      background: var(--bg-3);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 7px 8px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+
+    .stat-card:hover {
+      border-color: var(--border-md);
+      background: var(--bg-4);
+    }
+
+    .stat-label {
+      font-size: 9px;
+      color: var(--text-3);
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      margin-bottom: 3px;
+    }
+
+    .stat-value {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-1);
+      letter-spacing: -0.3px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .stat-value.positive { color: var(--green); }
+    .stat-value.negative { color: var(--red); }
+    .stat-value.loading  { color: var(--text-3); font-size: 10px; }
+
+    /* ── Tab bar ──────────────────────────────── */
+    .tab-bar {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-2);
+      flex-shrink: 0;
+    }
+
+    .tab-btn {
+      flex: 1;
+      padding: 9px 4px;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-3);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+
+    .tab-btn.active {
+      color: var(--teal);
+      border-bottom-color: var(--teal);
+    }
+
+    .tab-btn:hover:not(.active) {
+      color: var(--text-2);
+    }
+
+    /* ── Tab panels ───────────────────────────── */
+    .tab-panels {
+      flex: 1;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .panel {
+      position: absolute;
+      inset: 0;
+      overflow-y: auto;
+      display: none;
+      flex-direction: column;
+    }
+
+    .panel.active { display: flex; }
+
+    /* scrollbar */
+    .panel::-webkit-scrollbar { width: 3px; }
+    .panel::-webkit-scrollbar-track { background: transparent; }
+    .panel::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 2px; }
+
+    /* ── CHAT PANEL ───────────────────────────── */
+    #panel-chat {
+      flex-direction: column;
+    }
+
+    .chips-bar {
+      padding: 10px 10px 6px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      background: var(--bg);
+    }
+
+    .chip {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-2);
+      background: var(--bg-3);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px 10px;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+
+    .chip:hover {
+      color: var(--teal);
+      border-color: rgba(0,212,170,0.3);
+      background: var(--teal-dim);
+    }
+
+    .chatbox {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-height: 0;
+    }
+
+    .chatbox::-webkit-scrollbar { width: 3px; }
+    .chatbox::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 2px; }
+
+    /* messages */
+    .msg {
+      display: flex;
+      flex-direction: column;
+      max-width: 90%;
+      animation: msgIn 0.2s ease-out;
+    }
+
+    @keyframes msgIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .msg.user { align-self: flex-end; align-items: flex-end; }
+    .msg.ai   { align-self: flex-start; align-items: flex-start; }
+
+    .msg-bubble {
+      padding: 9px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      line-height: 1.55;
+      word-break: break-word;
+    }
+
+    .msg.user .msg-bubble {
+      background: var(--teal);
+      color: var(--bg);
+      border-bottom-right-radius: 3px;
+      font-weight: 400;
+    }
+
+    .msg.ai .msg-bubble {
+      background: var(--bg-3);
+      border: 1px solid var(--border);
+      color: var(--text-1);
+      border-bottom-left-radius: 3px;
+    }
+
+    .msg-time {
+      font-size: 9px;
+      color: var(--text-3);
+      margin-top: 3px;
+      padding: 0 2px;
+      letter-spacing: 0.3px;
+    }
+
+    /* typing indicator */
+    .typing-bubble {
+      background: var(--bg-3);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      border-bottom-left-radius: 3px;
+      padding: 11px 14px;
+      display: flex;
+      gap: 4px;
+      align-items: center;
+      align-self: flex-start;
+    }
+
+    .typing-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--teal);
+      opacity: 0.5;
+      animation: blink 1.2s ease-in-out infinite;
+    }
+    .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes blink {
+      0%, 80%, 100% { transform: scale(1); opacity: 0.4; }
+      40% { transform: scale(1.3); opacity: 1; }
+    }
+
+    /* error message */
+    .msg-error {
+      align-self: center;
+      background: rgba(255,87,87,0.1);
+      border: 1px solid rgba(255,87,87,0.2);
+      color: var(--red);
+      border-radius: 8px;
+      padding: 7px 12px;
+      font-size: 11px;
+      max-width: 95%;
+      text-align: center;
+    }
+
+    /* input area */
+    .input-bar {
+      padding: 10px;
+      border-top: 1px solid var(--border);
+      background: var(--bg-2);
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+      flex-shrink: 0;
+    }
+
+    .input-wrap {
+      flex: 1;
+      position: relative;
+    }
+
+    #userInput {
+      width: 100%;
+      background: var(--bg-3);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text-1);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      padding: 9px 12px;
+      resize: none;
+      outline: none;
+      line-height: 1.4;
+      max-height: 80px;
+      overflow-y: auto;
+      transition: border-color 0.15s;
+    }
+
+    #userInput::placeholder { color: var(--text-3); }
+
+    #userInput:focus {
+      border-color: rgba(0,212,170,0.4);
+    }
+
+    #sendBtn {
+      width: 34px;
+      height: 34px;
+      border-radius: 9px;
+      background: var(--teal);
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+
+    #sendBtn:hover  { opacity: 0.85; }
+    #sendBtn:active { transform: scale(0.94); }
+    #sendBtn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    #sendBtn svg { width: 14px; height: 14px; fill: var(--bg); }
+
+    /* ── SUMMARY PANEL ────────────────────────── */
+    #panel-summary {
+      padding: 10px;
+      gap: 8px;
+    }
+
+    .section-head {
+      font-size: 9px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--text-3);
+      padding: 4px 0 6px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 2px;
+    }
+
+    .budget-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 6px;
+      align-items: center;
+      padding: 6px 8px;
+      border-radius: 7px;
+      transition: background 0.12s;
+      cursor: default;
+    }
+
+    .budget-row:hover { background: var(--bg-3); }
+
+    .budget-row-name {
+      font-size: 11px;
+      color: var(--text-2);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .budget-row-amounts {
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .budget-planned {
+      font-size: 10px;
+      color: var(--text-3);
+    }
+
+    .budget-actual {
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    .bar-wrap {
+      grid-column: 1 / -1;
+      height: 2px;
+      background: var(--bg-4);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: -2px;
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: 2px;
+      transition: width 0.4s ease;
+    }
+
+    .bar-fill.ok      { background: var(--teal); }
+    .bar-fill.warning { background: var(--amber); }
+    .bar-fill.over    { background: var(--red); }
+
+    .empty-state {
+      padding: 24px 0;
+      text-align: center;
+      color: var(--text-3);
+      font-size: 11px;
+    }
+
+    .refresh-btn {
+      display: block;
+      width: 100%;
+      margin-top: 4px;
+      padding: 9px;
+      background: var(--bg-3);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-2);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .refresh-btn:hover { border-color: var(--border-md); color: var(--teal); }
+
+    /* ── GOALS PANEL ──────────────────────────── */
+    #panel-goals {
+      padding: 10px;
+      gap: 8px;
+    }
+
+    .goal-card {
+      background: var(--bg-3);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      transition: border-color 0.15s;
+    }
+
+    .goal-card:hover { border-color: var(--border-md); }
+
+    .goal-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 6px;
+    }
+
+    .goal-name {
+      font-family: var(--font-head);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-1);
+    }
+
+    .goal-pct {
+      font-size: 11px;
+      color: var(--teal);
+      font-weight: 500;
+    }
+
+    .goal-progress-bar {
+      height: 4px;
+      background: var(--bg-4);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 6px;
+    }
+
+    .goal-bar-fill {
+      height: 100%;
+      background: var(--teal);
+      border-radius: 4px;
+      transition: width 0.5s ease;
+    }
+
+    .goal-amounts {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      color: var(--text-3);
+    }
+
+    .goal-current { color: var(--text-2); }
+
+    .goal-due {
+      font-size: 9px;
+      color: var(--text-3);
+      margin-top: 4px;
+      letter-spacing: 0.3px;
+    }
+
+    /* ── Loading overlay ───────────────────────── */
+    .panel-loader {
+      padding: 24px;
+      text-align: center;
+      color: var(--text-3);
+      font-size: 11px;
+    }
+
+    .panel-loader::after {
+      content: '';
+      display: block;
+      width: 20px;
+      height: 20px;
+      border: 2px solid var(--bg-4);
+      border-top-color: var(--teal);
+      border-radius: 50%;
+      margin: 10px auto 0;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- ── Header ─────────────────────────────── -->
+  <div class="header">
+    <div class="header-top">
+      <div class="logo">
+        <div class="logo-mark">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 2.61 1.36 4.89 3.39 6.19L8 18h8l-.39-2.81C17.64 13.89 19 11.61 19 9c0-3.87-3.13-7-7-7zm-1 14v-2h2v2h-2zm1-4c-2.21 0-4-1.79-4-4h2c0 1.1.9 2 2 2s2-.9 2-2h2c0 2.21-1.79 4-4 4z"/>
+          </svg>
+        </div>
+        <span class="logo-text">Cipher<span>Money</span></span>
+      </div>
+      <div class="month-badge" id="monthBadge">—</div>
+    </div>
+    <!-- Quick stats -->
+    <div class="stats-row">
+      <div class="stat-card" onclick="askQuick('How is my income this month?')">
+        <div class="stat-label">Income</div>
+        <div class="stat-value positive loading" id="statIncome">···</div>
+      </div>
+      <div class="stat-card" onclick="askQuick('What are my top expenses this month?')">
+        <div class="stat-label">Expenses</div>
+        <div class="stat-value negative loading" id="statExpenses">···</div>
+      </div>
+      <div class="stat-card" onclick="askQuick('What is my net savings this month?')">
+        <div class="stat-label">Net</div>
+        <div class="stat-value loading" id="statNet">···</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Tab bar ────────────────────────────── -->
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="chat">Chat</button>
+    <button class="tab-btn" data-tab="summary">Budget</button>
+    <button class="tab-btn" data-tab="goals">Goals</button>
+  </div>
+
+  <!-- ── Tab panels ─────────────────────────── -->
+  <div class="tab-panels">
+
+    <!-- CHAT -->
+    <div class="panel active" id="panel-chat">
+      <div class="chips-bar" id="chipsBar">
+        <span class="chip" onclick="askQuick('Summarize my spending this month')">This month</span>
+        <span class="chip" onclick="askQuick('Which categories am I overspending?')">Overspending</span>
+        <span class="chip" onclick="askQuick('How are my savings goals tracking?')">Goals</span>
+        <span class="chip" onclick="askQuick('Give me one tip to save more money')">Save more</span>
+        <span class="chip" onclick="askQuick('What are my biggest expenses?')">Top expenses</span>
+      </div>
+      <div class="chatbox" id="chatbox">
+        <!-- Welcome message -->
+        <div class="msg ai">
+          <div class="msg-bubble">
+            Hey — I'm your Cipher Money assistant. Ask me anything about your budget, transactions, or goals. I have live access to your Supabase data.
+          </div>
+          <span class="msg-time" id="welcomeTime"></span>
+        </div>
+      </div>
+      <div class="input-bar">
+        <div class="input-wrap">
+          <textarea id="userInput" rows="1" placeholder="Ask about your finances…"></textarea>
+        </div>
+        <button id="sendBtn" title="Send">
+          <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- SUMMARY -->
+    <div class="panel" id="panel-summary">
+      <div class="panel-loader" id="summaryLoader">Loading budget data</div>
+      <div id="summaryContent" style="display:none; padding:10px; display:none; flex-direction:column; gap:6px;"></div>
+    </div>
+
+    <!-- GOALS -->
+    <div class="panel" id="panel-goals">
+      <div class="panel-loader" id="goalsLoader">Loading goals</div>
+      <div id="goalsContent" style="display:none; padding:10px; flex-direction:column; gap:8px;"></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ── State ────────────────────────────────────────────────────
+const MONTH_YEAR = getCurrentMonthYear_();
+let chatHistory  = [];
+let isLoading    = false;
+let summaryLoaded = false;
+let goalsLoaded   = false;
+
+// ── Init ─────────────────────────────────────────────────────
+document.getElementById('monthBadge').textContent = MONTH_YEAR;
+document.getElementById('welcomeTime').textContent = formatTime_();
+autoResizeTextarea_(document.getElementById('userInput'));
+
+// Load header stats after a short delay
+setTimeout(loadHeaderStats_, 600);
+
+// ── Tab switching ─────────────────────────────────────────────
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tab = btn.dataset.tab;
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('panel-' + tab).classList.add('active');
+
+    if (tab === 'summary' && !summaryLoaded) loadSummary_();
+    if (tab === 'goals'   && !goalsLoaded)   loadGoals_();
+  });
+});
+
+// ── Send message ──────────────────────────────────────────────
+document.getElementById('sendBtn').addEventListener('click', sendMessage_);
+document.getElementById('userInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage_(); }
+});
+
+function askQuick(text) {
+  // Switch to chat tab
+  document.querySelectorAll('.tab-btn')[0].click();
+  document.getElementById('userInput').value = text;
+  sendMessage_();
+}
+
+function sendMessage_() {
+  const input = document.getElementById('userInput');
+  const query = input.value.trim();
+  if (!query || isLoading) return;
+
+  appendUserMessage_(query);
+  input.value = '';
+  input.style.height = 'auto';
+  chatHistory.push({ sender: 'User', text: query });
+
+  const historyStr = chatHistory.slice(-6)
+    .map(m => `${m.sender}: ${m.text}`)
+    .join('\n');
+
+  setLoading_(true);
+  showTyping_();
+
+  google.script.run
+    .withSuccessHandler(handleAIResponse_)
+    .withFailureHandler(handleError_)
+    .askCipherAI(query, historyStr, MONTH_YEAR);
+}
+
+function handleAIResponse_(text) {
+  setLoading_(false);
+  removeTyping_();
+  setTimeout(() => {
+    appendAIMessage_(text || 'No response received.');
+    chatHistory.push({ sender: 'AI', text: text });
+    // Trim history
+    if (chatHistory.length > 20) chatHistory = chatHistory.slice(-20);
+  }, 180);
+}
+
+function handleError_(err) {
+  setLoading_(false);
+  removeTyping_();
+  const msg = err?.message?.includes('API key') 
+    ? 'Gemini API key not set. Use Budget Tools > Set Gemini API Key.'
+    : err?.message?.includes('Supabase')
+    ? 'Supabase credentials not set. Use Budget Tools > Set Supabase Credentials.'
+    : 'Something went wrong. Check script logs.';
+  appendError_(msg);
+}
+
+// ── Message renderers ─────────────────────────────────────────
+function appendUserMessage_(text) {
+  const el = document.createElement('div');
+  el.className = 'msg user';
+  el.innerHTML = `
+    <div class="msg-bubble">${escHtml_(text)}</div>
+    <span class="msg-time">${formatTime_()}</span>`;
+  document.getElementById('chatbox').appendChild(el);
+  scrollChat_();
+}
+
+function appendAIMessage_(text) {
+  const el = document.createElement('div');
+  el.className = 'msg ai';
+  // Format numbers in the response with a subtle highlight
+  const formatted = escHtml_(text).replace(/(\$[\d,]+\.?\d*)/g, '<strong>$1</strong>');
+  el.innerHTML = `
+    <div class="msg-bubble">${formatted}</div>
+    <span class="msg-time">${formatTime_()}</span>`;
+  document.getElementById('chatbox').appendChild(el);
+  scrollChat_();
+}
+
+function appendError_(msg) {
+  const el = document.createElement('div');
+  el.className = 'msg-error';
+  el.textContent = msg;
+  document.getElementById('chatbox').appendChild(el);
+  scrollChat_();
+}
+
+function showTyping_() {
+  const el = document.createElement('div');
+  el.id = 'typingBubble';
+  el.className = 'typing-bubble';
+  el.innerHTML = '<div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>';
+  document.getElementById('chatbox').appendChild(el);
+  scrollChat_();
+}
+
+function removeTyping_() {
+  const el = document.getElementById('typingBubble');
+  if (el) el.remove();
+}
+
+function scrollChat_() {
+  const box = document.getElementById('chatbox');
+  setTimeout(() => { box.scrollTop = box.scrollHeight; }, 60);
+}
+
+// ── Header stats ──────────────────────────────────────────────
+function loadHeaderStats_() {
+  // Ask the AI for a structured summary to populate stats
+  google.script.run
+    .withSuccessHandler(function(text) {
+      // Parse the AI's response for numbers - fallback to showing the month
+      try {
+        // Try to extract dollar amounts from any context we can get
+        parseStatsFromResponse_(text);
+      } catch(e) {
+        clearStatLoaders_();
+      }
+    })
+    .withFailureHandler(function() { clearStatLoaders_(); })
+    .askCipherAI(
+      'In exactly this format and nothing else, reply with three numbers separated by pipes: ' +
+      'total income this month | total expenses this month | net savings this month. ' +
+      'Use numbers only with dollar sign, like: $4200.00|$3100.00|$1100.00',
+      '',
+      MONTH_YEAR
+    );
+}
+
+function parseStatsFromResponse_(text) {
+  if (!text) { clearStatLoaders_(); return; }
+  const parts = text.replace(/\s/g,'').split('|');
+  if (parts.length >= 3) {
+    setStatValue_('statIncome',   parts[0], 'positive');
+    setStatValue_('statExpenses', parts[1], 'negative');
+    const net = parseFloat(parts[2].replace(/[^0-9.-]/g, ''));
+    setStatValue_('statNet', parts[2], net >= 0 ? 'positive' : 'negative');
+  } else {
+    clearStatLoaders_();
+  }
+}
+
+function setStatValue_(id, value, cls) {
+  const el = document.getElementById(id);
+  el.textContent = value;
+  el.className = 'stat-value ' + cls;
+}
+
+function clearStatLoaders_() {
+  ['statIncome','statExpenses','statNet'].forEach(id => {
+    const el = document.getElementById(id);
+    el.textContent = '—';
+    el.className = 'stat-value';
+  });
+}
+
+// ── Summary panel ─────────────────────────────────────────────
+function loadSummary_() {
+  summaryLoaded = true;
+  document.getElementById('summaryLoader').style.display = 'flex';
+  document.getElementById('summaryContent').style.display = 'none';
+
+  google.script.run
+    .withSuccessHandler(renderSummary_)
+    .withFailureHandler(function() {
+      document.getElementById('summaryLoader').innerHTML =
+        '<div style="color:var(--red);font-size:11px">Could not load budget data.</div>';
+    })
+    .askCipherAI(
+      'List every budget category with its planned amount and actual spent amount this month. ' +
+      'Format each line exactly as: CATEGORY|planned|actual — one per line, nothing else. ' +
+      'Use numbers without dollar signs.',
+      '',
+      MONTH_YEAR
+    );
+}
+
+function renderSummary_(text) {
+  const loader  = document.getElementById('summaryLoader');
+  const content = document.getElementById('summaryContent');
+  loader.style.display = 'none';
+
+  if (!text || !text.includes('|')) {
+    content.innerHTML = '<div class="empty-state">No budget data found for ' + MONTH_YEAR + '.</div>';
+    content.style.display = 'flex';
+    return;
+  }
+
+  const lines = text.trim().split('\n').filter(l => l.includes('|'));
+  let html = '<div class="section-head">Budget vs Actuals — ' + MONTH_YEAR + '</div>';
+
+  lines.forEach(line => {
+    const parts   = line.split('|');
+    if (parts.length < 3) return;
+    const cat     = parts[0].trim();
+    const planned = parseFloat(parts[1]) || 0;
+    const actual  = parseFloat(parts[2]) || 0;
+    const pct     = planned > 0 ? Math.min((actual / planned) * 100, 100) : 0;
+    const over    = actual > planned;
+    const barCls  = actual > planned ? 'over' : pct > 80 ? 'warning' : 'ok';
+    const amtCls  = over ? 'negative' : 'positive';
+
+    html += `
+      <div class="budget-row">
+        <div class="budget-row-name">${escHtml_(cat)}</div>
+        <div class="budget-row-amounts">
+          <div class="budget-planned">/$${planned.toFixed(0)}</div>
+          <div class="budget-actual ${amtCls}">$${actual.toFixed(0)}</div>
+        </div>
+        <div class="bar-wrap" style="grid-column:1/-1">
+          <div class="bar-fill ${barCls}" style="width:${pct}%"></div>
+        </div>
+      </div>`;
+  });
+
+  html += `<button class="refresh-btn" onclick="summaryLoaded=false; loadSummary_()">Refresh data</button>`;
+  content.innerHTML = html;
+  content.style.display = 'flex';
+}
+
+// ── Goals panel ───────────────────────────────────────────────
+function loadGoals_() {
+  goalsLoaded = true;
+  document.getElementById('goalsLoader').style.display = 'flex';
+  document.getElementById('goalsContent').style.display = 'none';
+
+  google.script.run
+    .withSuccessHandler(renderGoals_)
+    .withFailureHandler(function() {
+      document.getElementById('goalsLoader').innerHTML =
+        '<div style="color:var(--red);font-size:11px">Could not load goals.</div>';
+    })
+    .askCipherAI(
+      'List all my savings goals. For each one, format exactly as: ' +
+      'NAME|current_amount|target_amount|due_date — one per line, nothing else. ' +
+      'Use numbers without dollar signs. Use "none" if no due date.',
+      '',
+      MONTH_YEAR
+    );
+}
+
+function renderGoals_(text) {
+  const loader  = document.getElementById('goalsLoader');
+  const content = document.getElementById('goalsContent');
+  loader.style.display = 'none';
+
+  if (!text || !text.includes('|')) {
+    content.innerHTML = '<div class="empty-state">No savings goals found.</div>';
+    content.style.display = 'flex';
+    return;
+  }
+
+  const lines = text.trim().split('\n').filter(l => l.includes('|'));
+  let html = '<div class="section-head">Savings Goals</div>';
+
+  lines.forEach(line => {
+    const parts   = line.split('|');
+    if (parts.length < 3) return;
+    const name    = parts[0].trim();
+    const current = parseFloat(parts[1]) || 0;
+    const target  = parseFloat(parts[2]) || 1;
+    const due     = parts[3]?.trim();
+    const pct     = Math.min((current / target) * 100, 100);
+    const pctDisp = pct.toFixed(1);
+    const remaining = target - current;
+
+    html += `
+      <div class="goal-card">
+        <div class="goal-top">
+          <div class="goal-name">${escHtml_(name)}</div>
+          <div class="goal-pct">${pctDisp}%</div>
+        </div>
+        <div class="goal-progress-bar">
+          <div class="goal-bar-fill" style="width:${pct}%"></div>
+        </div>
+        <div class="goal-amounts">
+          <span class="goal-current">$${current.toFixed(2)}</span>
+          <span>$${target.toFixed(2)} target</span>
+        </div>
+        ${due && due !== 'none' ? `<div class="goal-due">Due: ${due} — $${remaining.toFixed(2)} remaining</div>` : ''}
+      </div>`;
+  });
+
+  html += `<button class="refresh-btn" onclick="goalsLoaded=false; loadGoals_()">Refresh goals</button>`;
+  content.innerHTML = html;
+  content.style.display = 'flex';
+}
+
+// ── Helpers ───────────────────────────────────────────────────
+function setLoading_(on) {
+  isLoading = on;
+  document.getElementById('sendBtn').disabled  = on;
+  document.getElementById('userInput').disabled = on;
+  if (!on) document.getElementById('userInput').focus();
+}
+
+function formatTime_() {
+  const d = new Date();
+  let h = d.getHours(), m = d.getMinutes().toString().padStart(2,'0');
+  const ap = h >= 12 ? 'pm' : 'am';
+  h = h % 12 || 12;
+  return `${h}:${m} ${ap}`;
+}
+
+function getCurrentMonthYear_() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function escHtml_(str) {
+  return String(str)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+
+function autoResizeTextarea_(el) {
+  el.addEventListener('input', () => {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 80) + 'px';
+  });
+}
+</script>
+</body>
+</html>

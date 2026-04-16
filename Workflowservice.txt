@@ -1,0 +1,556 @@
+/**
+ * ============================================================
+ * workflowService.gs — Budget Assistant (PROFILES-DRIVEN)
+ * 
+ * Workflows for:
+ * - Monthly budget sheet creation
+ * - Transaction export
+ * - AI context building
+ * - Trigger installation
+ * ============================================================
+ */
+
+// ── MENU ───────────────────────────────────────────────
+
+/**
+ * Creates custom menu when spreadsheet opens
+ */
+function onOpen() {
+  const ui = SpreadsheetApp.getUi();
+
+  ui.createMenu('💰 Budget Assistant')
+    .addItem('📊 Create Monthly Budget', 'createMonthlyBudgetSheet')
+    .addItem('📤 Export Transactions', 'createTransactionExportSheet')
+    .addSeparator()
+    .addItem('🤖 Open AI Assistant', 'showBudgetSidebar')
+    .addSeparator()
+    .addSubMenu(ui.createMenu('⚙️ Settings')
+      .addItem('🔑 Set Supabase Credentials', 'showSupabasePrompt')
+      .addItem('📥 Sync All Data', 'syncAllSheets')
+      .addItem('⏰ Install Automations', 'installTriggers')
+      .addItem('📋 View Profiles', 'showProfileSummary'))
+    .addToUi();
+
+  console.log("✅ Menu created");
+}
+
+// ── CREDENTIALS SETUP ──────────────────────────────────
+
+/**
+ * Shows prompt to set Supabase credentials
+ */
+function showSupabasePrompt() {
+  const ui = SpreadsheetApp.getUi();
+
+  const response = ui.prompt(
+    '🔑 Set Supabase Credentials',
+    'Paste your credentials JSON: {"url":"...", "anonKey":"...", "userId":"..."}',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+
+  try {
+    const json = JSON.parse(response.getResponseText());
+    const { url, anonKey, userId } = json;
+
+    if (!url || !anonKey || !userId) {
+      ui.alert('❌ Missing required fields: url, anonKey, userId');
+      return;
+    }
+
+    setSupabaseCredentials(url, anonKey, userId);
+    ui.alert('✅ Credentials saved successfully!');
+    syncAllSheets();
+  } catch (e) {
+    ui.alert(`❌ Invalid JSON: ${e.message}`);
+  }
+}
+
+// ── SHEET CREATION ─────────────────────────────────────
+
+/**
+ * Creates a monthly budget sheet for specified month
+ * Uses Profiles as row entities, days as columns
+ */
+function createMonthlyBudgetSheet() {
+  const ui = SpreadsheetApp.getUi();
+
+  const response = ui.prompt(
+    '📊 Create Monthly Budget',
+    'Enter month (YYYY-MM) or leave blank for current month:',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+
+  let monthYear = response.getResponseText().trim();
+
+  if (!monthYear) {
+    monthYear = getMonthYear();
+  }
+
+  if (!isValidMonthYear(monthYear)) {
+    ui.alert('❌ Invalid format. Use YYYY-MM (e.g., 2025-05)');
+    return;
+  }
+
+  try {
+    buildMonthlySheet_(monthYear);
+    ui.alert(`✅ Sheet "${monthYear}" created successfully!`);
+  } catch (e) {
+    console.log(`Error: ${e}`);
+    ui.alert(`❌ Error: ${e.message}`);
+  }
+}
+
+/**
+ * Internal: Builds the monthly budget sheet structure
+ * 
+ * Layout:
+ * Row 1-2: Headers & Controls
+ * Row 3: Section (INCOME / EXPENSES / SAVINGS)
+ * Row 4+: Profile rows with daily columns (D-AH for 31 days)
+ * Col A: Profile names
+ * Col B: Monthly totals
+ * Col C: Monthly actual
+ * Col D-AH: Daily values (sum to monthly total)
+ */
+function buildMonthlySheet_(monthYear) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  let sheet = ss.getSheetByName(monthYear);
+  if (sheet) {
+    const ui = SpreadsheetApp.getUi();
+    const confirm = ui.alert(
+      `Sheet "${monthYear}" already exists. Overwrite?`,
+      ui.ButtonSet.YES_NO
+    );
+    if (confirm !== ui.Button.YES) return;
+    sheet.clear();
+  } else {
+    sheet = ss.insertSheet(monthYear);
+  }
+
+  SpreadsheetApp.setActiveSheet(sheet);
+
+  console.log(`🏗️ Building sheet for ${monthYear}`);
+
+  const profiles = getProfiles();
+  const budgetMap = buildBudgetMap(monthYear);
+
+  // ── HEADERS ────────────────────────────────────
+  sheet.getRange('A1').setValue(`Budget: ${monthYear}`).setFontWeight('bold').setFontSize(14);
+  sheet.getRange('A2').setValue('Profile').setFontWeight('bold');
+  sheet.getRange('B2').setValue('Planned').setFontWeight('bold');
+  sheet.getRange('C2').setValue('Actual').setFontWeight('bold');
+
+  // Set date headers (D2:AH2 for days 1-31)
+  const dateHeaders = [];
+  for (let day = 1; day <= 31; day++) {
+    dateHeaders.push([day]);
+  }
+  sheet.getRange(2, 4, 1, 31).setValues([dateHeaders.flat()]).setFontWeight('bold').setBackground('#e9ecef');
+
+  // ── CATEGORIZE PROFILES ────────────────────────
+  const income = profiles.filter(p => p.account_type === 'INCOME');
+  const expenses = profiles.filter(p => p.account_type === 'EXPENSE');
+  const savings = profiles.filter(p => !['INCOME', 'EXPENSE'].includes(p.account_type));
+
+  const profilesByType = { income, expenses, savings };
+  const sectionRows = {};
+
+  // ── BUILD SECTIONS ─────────────────────────────
+  let currentRow = 3;
+
+  Object.keys(profilesByType).forEach(type => {
+    const typeProfiles = profilesByType[type];
+
+    // Section header
+    const sectionName = type.toUpperCase();
+    sheet.getRange(currentRow, 1)
+      .setValue(sectionName)
+      .setFontWeight('bold')
+      .setBackground(getSectionColor_(type));
+
+    sectionRows[type] = { headerRow: currentRow, profiles: [] };
+    currentRow++;
+
+    // Profile rows
+    typeProfiles.forEach(p => {
+      sheet.getRange(currentRow, 1).setValue(p.name);
+      sheet.getRange(currentRow, 2).setValue(budgetMap[p.name] || 0);
+
+      // Monthly Actual formula: SUM of daily values
+      sheet.getRange(currentRow, 3).setFormula(`=SUM(D${currentRow}:AH${currentRow})`);
+
+      // Daily cells will be filled by fillDailyTransactions_()
+      sectionRows[type].profiles.push({ id: p.id, row: currentRow, name: p.name });
+
+      currentRow++;
+    });
+
+    // Subtotal row
+    const subtotalRow = currentRow;
+    const dataStartRow = sectionRows[type].headerRow + 1;
+    const dataEndRow = currentRow - 1;
+
+    sheet.getRange(subtotalRow, 1).setValue(`Total ${sectionName}`).setFontWeight('bold').setFontColor('white');
+    sheet.getRange(subtotalRow, 1, 1, 31).setBackground('#666666');
+
+    sheet.getRange(subtotalRow, 2)
+      .setFormula(`=SUM(B${dataStartRow}:B${dataEndRow})`)
+      .setFontWeight('bold');
+
+    sheet.getRange(subtotalRow, 3)
+      .setFormula(`=SUM(C${dataStartRow}:C${dataEndRow})`)
+      .setFontWeight('bold');
+
+    for (let col = 4; col <= 34; col++) { // D-AH
+      const colLetter = columnToLetter_(col);
+      sheet.getRange(subtotalRow, col)
+        .setFormula(`=SUM(${colLetter}${dataStartRow}:${colLetter}${dataEndRow})`)
+        .setFontWeight('bold');
+    }
+
+    currentRow += 2; // Blank row after section
+  });
+
+  // ── FILL DAILY TRANSACTIONS ────────────────────
+  fillDailyTransactions_(sheet, monthYear, sectionRows);
+
+  // ── FORMATTING ─────────────────────────────────
+  sheet.setFrozenRows(2);
+  sheet.setFrozenColumns(1);
+
+  // Currency format
+  sheet.getRange('B3:AH' + (currentRow - 1)).setNumberFormat('$#,##0.00;$(#,##0.00)');
+
+  // Column widths
+  sheet.setColumnWidth(1, 200); // Profile names
+  sheet.setColumnWidth(2, 100); // Planned
+  sheet.setColumnWidth(3, 100); // Actual
+  sheet.setColumnWidths(4, 31, 35); // Daily columns
+
+  console.log(`✅ Sheet built with ${profiles.length} profiles`);
+}
+
+/**
+ * Fills daily transaction values into sheet columns (D-AH)
+ * Groups transactions by profile & date
+ */
+function fillDailyTransactions_(sheet, monthYear, sectionRows) {
+  const txns = getTransactionsByMonth(monthYear);
+
+  console.log(`📝 Filling ${txns.length} transactions into daily columns`);
+
+  if (txns.length === 0) return;
+
+  // Build map: {profileId: {dateDay: [amounts]}}
+  const cellData = {};
+
+  txns.forEach(t => {
+    const day = parseInt(t.date.split('T')[0].split('-')[2], 10);
+    const col = day + 3; // D=4, E=5, ... AH=34
+
+    // Find row for this profile
+    let targetRow = null;
+    Object.keys(sectionRows).forEach(type => {
+      sectionRows[type].profiles.forEach(p => {
+        if (p.id === t.profile_id) {
+          targetRow = p.row;
+        }
+      });
+    });
+
+    if (!targetRow) {
+      console.log(`⚠️ No row for profile ${t.profile_id}`);
+      return;
+    }
+
+    const key = `${targetRow},${col}`;
+    if (!cellData[key]) cellData[key] = [];
+
+    const signedAmount = (t.type === 'expense') ? -Math.abs(t.amount) : Math.abs(t.amount);
+    cellData[key].push(signedAmount);
+  });
+
+  // Apply formulas
+  Object.keys(cellData).forEach(key => {
+    const [row, col] = key.split(',').map(Number);
+    const amounts = cellData[key];
+    sheet.getRange(row, col).setValue(amounts.length > 1 ? amounts.reduce((a, b) => a + b, 0) : amounts[0]);
+  });
+
+  console.log(`✅ Filled ${Object.keys(cellData).length} cells`);
+}
+
+/**
+ * Returns color for section header
+ */
+function getSectionColor_(type) {
+  const colors = {
+    income: '#d4edda',  // Green
+    expenses: '#f8d7da', // Red
+    savings: '#d1ecf1'  // Blue
+  };
+  return colors[type] || '#f0f0f0';
+}
+
+function columnToLetter_(column) {
+  let result = '';
+  let current = column;
+
+  while (current > 0) {
+    const remainder = (current - 1) % 26;
+    result = String.fromCharCode(65 + remainder) + result;
+    current = Math.floor((current - 1) / 26);
+  }
+
+  return result;
+}
+
+// ── DATA EXPORT ────────────────────────────────────────
+
+/**
+ * Creates Transaction Export sheet
+ */
+function createTransactionExportSheet() {
+  const ui = SpreadsheetApp.getUi();
+
+  const response = ui.prompt(
+    '📤 Export Transactions',
+    'Enter month (YYYY-MM) or leave blank for current:',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+
+  let monthYear = response.getResponseText().trim();
+
+  if (!monthYear) {
+    monthYear = getMonthYear();
+  }
+
+  if (!isValidMonthYear(monthYear)) {
+    ui.alert('❌ Invalid format. Use YYYY-MM');
+    return;
+  }
+
+  try {
+    createTransactionExportSheet_(monthYear);
+    ui.alert(`✅ Exported ${monthYear} transactions`);
+  } catch (e) {
+    ui.alert(`❌ Error: ${e.message}`);
+  }
+}
+
+/**
+ * Internal: Creates export sheet
+ */
+function createTransactionExportSheet_(monthYear) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetName = `EXPORT-${monthYear}`;
+
+  let sheet = ss.getSheetByName(sheetName);
+  if (sheet) {
+    sheet.clear();
+  } else {
+    sheet = ss.insertSheet(sheetName);
+  }
+
+  console.log(`📤 Exporting ${monthYear}`);
+
+  const txns = getTransactionsByMonth(monthYear);
+  const profiles = getProfiles();
+
+  const profileMap = {};
+  profiles.forEach(p => (profileMap[p.id] = p.name));
+
+  // Headers
+  sheet.getRange(1, 1, 1, 5)
+    .setValues([['Date', 'Description', 'Profile', 'Amount', 'Type']])
+    .setFontWeight('bold')
+    .setBackground('#4361ee')
+    .setFontColor('#ffffff');
+
+  // Data
+  const rows = txns
+    .filter(t => profileMap[t.profile_id])
+    .map(t => [
+      t.date.split('T')[0],
+      t.description || '',
+      profileMap[t.profile_id],
+      t.amount,
+      t.type
+    ]);
+
+  if (rows.length) {
+    sheet.getRange(2, 1, rows.length, 5).setValues(rows);
+    sheet.getRange(2, 4, rows.length, 1).setNumberFormat('$#,##0.00;$(#,##0.00)');
+  }
+
+  sheet.setFrozenRows(1);
+  sheet.autoResizeColumns(1, 5);
+
+  console.log(`✅ Exported ${rows.length} transactions`);
+}
+
+// ── SIDEBAR ────────────────────────────────────────────
+
+/**
+ * Opens the Budget Assistant sidebar
+ */
+function showBudgetSidebar() {
+  try {
+    const html = HtmlService.createHtmlOutputFromFile('Sidebar')
+      .setWidth(350)
+      .setHeight(600);
+
+    SpreadsheetApp.getUi().showSidebar(html);
+  } catch (e) {
+    SpreadsheetApp.getUi().alert(`Error opening sidebar: ${e.message}`);
+  }
+}
+
+// ── DATA SYNC ──────────────────────────────────────────
+
+/**
+ * Syncs all data sheets from Supabase
+ */
+function syncAllSheets() {
+  const ui = SpreadsheetApp.getUi();
+
+  try {
+    console.log("🔄 Starting full sync...");
+
+    const currentMonth = getMonthYear();
+
+    syncTransactionLogSheet(currentMonth);
+    syncProfileSummarySheet();
+
+    ui.alert(`✅ Synced data for ${currentMonth}`);
+  } catch (e) {
+    console.log(`Error: ${e}`);
+    ui.alert(`❌ Sync error: ${e.message}`);
+  }
+}
+
+/**
+ * Shows profile summary (shortcut)
+ */
+function showProfileSummary() {
+  syncProfileSummarySheet();
+  SpreadsheetApp.getUi().alert('✅ Profile summary synced');
+}
+
+// ── AUTOMATIONS ────────────────────────────────────────
+
+/**
+ * Installs time-based triggers for automated workflows
+ */
+function installTriggers() {
+  const ui = SpreadsheetApp.getUi();
+
+  // Remove existing triggers
+  ScriptApp.getProjectTriggers().forEach(t => {
+    try {
+      ScriptApp.deleteTrigger(t);
+    } catch (e) {
+      console.log(`Could not delete trigger: ${e}`);
+    }
+  });
+
+  // Daily sync at 6 AM
+  ScriptApp.newTrigger('dailySyncData')
+    .timeBased()
+    .everyDays(1)
+    .atHour(6)
+    .create();
+
+  // Monthly budget creation (1st of month at 5 AM)
+  ScriptApp.newTrigger('monthlyBudgetReminder')
+    .timeBased()
+    .onMonthDay(1)
+    .atHour(5)
+    .create();
+
+  console.log("✅ Triggers installed");
+  ui.alert('✅ Automations installed!\n\n• Daily sync: 6 AM\n• Monthly budget: 1st @ 5 AM');
+}
+
+/**
+ * Daily automation: Syncs data
+ */
+function dailySyncData() {
+  try {
+    console.log("🔄 Daily sync triggered");
+    syncAllSheets();
+  } catch (e) {
+    console.log(`Daily sync error: ${e}`);
+  }
+}
+
+/**
+ * Monthly automation: Reminds to create new budget
+ */
+function monthlyBudgetReminder() {
+  try {
+    console.log("📅 Monthly reminder triggered");
+    const nextMonth = getMonthYear(1);
+    buildMonthlySheet_(nextMonth);
+  } catch (e) {
+    console.log(`Monthly reminder error: ${e}`);
+  }
+}
+
+// ── AI CONTEXT BUILDER ─────────────────────────────────
+
+/**
+ * Builds rich context for AI from current month data
+ * Returns JSON with budgets, actuals, goals, trends
+ */
+function buildAIContext(monthYear = null) {
+  if (!monthYear) monthYear = getMonthYear();
+
+  console.log(`🧠 Building AI context for ${monthYear}`);
+
+  const profiles = getProfiles();
+  const budgetMap = buildBudgetMap(monthYear);
+  const actualMap = buildActualMap(monthYear);
+  const goals = getGoals();
+
+  const context = {
+    month: monthYear,
+    profiles: profiles.map(p => ({
+      name: p.name,
+      type: p.account_type
+    })),
+    budget: budgetMap,
+    actuals: actualMap,
+    goals: goals.map(g => ({
+      name: g.name,
+      target: g.target_amount,
+      current: g.current_amount,
+      progress: g.current_amount / g.target_amount
+    })),
+    summary: {
+      totalIncome: calculateTotal_(actualMap, 'INCOME'),
+      totalExpenses: calculateTotal_(actualMap, 'EXPENSE'),
+      netSavings: calculateTotal_(actualMap, 'INCOME') - calculateTotal_(actualMap, 'EXPENSE')
+    }
+  };
+
+  console.log(`✅ Context built: ${JSON.stringify(context).substring(0, 100)}...`);
+
+  return context;
+}
+
+/**
+ * Helper: Calculates total for account type
+ */
+function calculateTotal_(actualMap, accountType) {
+  // Note: This is simplified. In production, you'd cross-reference profiles
+  const total = Object.values(actualMap).reduce((sum, val) => sum + val, 0);
+  return total;
+}

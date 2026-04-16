@@ -1,0 +1,160 @@
+/**
+ * ============================================================
+ * aiService.gs — Cipher Money
+ * AI integration using Gemini 1.5 Flash Latest for stability.
+ * Includes exponential backoff and detailed execution logging.
+ * ============================================================
+ */
+
+const AI = {
+  GEMINI_KEY_PROP: 'GEMINI_API_KEY',
+  // Strictly using gemini-flash-latest
+  GEMINI_ENDPOINT: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=',
+  MAX_OUTPUT_TOKENS: 800,
+  TEMPERATURE: 0.7,
+};
+
+/**
+ * Prompts the user to save their Gemini API key.
+ */
+function showApiKeyPrompt() {
+  const ui = SpreadsheetApp.getUi();
+  const res = ui.prompt('Set Gemini API Key', 'Paste your Gemini API key:', ui.ButtonSet.OK_CANCEL);
+  if (res.getSelectedButton() !== ui.Button.OK) return;
+  const key = res.getResponseText().trim();
+  if (!key) { ui.alert('Key cannot be empty.'); return; }
+  PropertiesService.getUserProperties().setProperty(AI.GEMINI_KEY_PROP, key);
+  ui.alert('✅ Gemini API Key saved.');
+}
+
+/**
+ * Core function to query Gemini with built-in retry logic (Exponential Backoff).
+ * Logs progress to the Apps Script Logger (View > Executions).
+ */
+function askCipherAI(userQuery, systemPrompt = '', monthYear = '') {
+  Logger.log(`--- AI Request Start (Model: gemini-flash-latest) ---`);
+  
+  const apiKey = PropertiesService.getUserProperties().getProperty(AI.GEMINI_KEY_PROP);
+  if (!apiKey) {
+    Logger.log('ERROR: No API Key found in UserProperties.');
+    throw new Error('Gemini API Key not found. Please set it in the menu.');
+  }
+
+  // Gather Financial Context from Supabase (via dataService.gs)
+  const context = {
+    month: monthYear || new Date().toISOString().slice(0, 7),
+    recent_transactions: getTransactionsByMonth(monthYear).slice(0, 15),
+    budgets: buildBudgetMap(monthYear),
+    goals: getGoals(),
+    summary: {
+      total_income: Object.values(buildActualMap(monthYear)).reduce((a, b) => a + b, 0)
+    }
+  };
+
+  Logger.log(`Context built for month: ${context.month}`);
+  Logger.log(`Transaction count included: ${context.recent_transactions.length}`);
+
+  const fullPrompt = `
+    Context: ${JSON.stringify(context)}
+    
+    User Question: ${userQuery}
+    
+    System Instructions: ${systemPrompt || 'You are Cipher Money, a helpful financial assistant. Provide concise, actionable advice based on the data provided.'}
+  `;
+
+  const payload = {
+    contents: [{ parts: [{ text: fullPrompt }] }],
+    generationConfig: {
+      maxOutputTokens: AI.MAX_OUTPUT_TOKENS,
+      temperature: AI.TEMPERATURE,
+    }
+  };
+
+  const options = {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+
+  // --- EXPONENTIAL BACKOFF IMPLEMENTATION ---
+  let response;
+  let lastError;
+  
+  for (let n = 0; n < 5; n++) {
+    try {
+      Logger.log(`Attempt ${n + 1} of 5...`);
+      const startTime = new Date().getTime();
+      response = UrlFetchApp.fetch(AI.GEMINI_ENDPOINT + apiKey, options);
+      const endTime = new Date().getTime();
+      
+      const statusCode = response.getResponseCode();
+      Logger.log(`Response received in ${endTime - startTime}ms. Status: ${statusCode}`);
+      
+      if (statusCode === 200) {
+        const json = JSON.parse(response.getContentText());
+        const textResponse = json.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (textResponse) {
+          Logger.log(`Success: Response generated successfully.`);
+          return textResponse;
+        } else {
+          Logger.log(`Warning: 200 OK but response parts are missing.`);
+          return "I processed your request but couldn't generate a text response.";
+        }
+      }
+      
+      if (statusCode === 429) {
+        const sleepTime = Math.pow(2, n) * 1000;
+        Logger.log(`Rate Limited (429). Retrying in ${sleepTime}ms...`);
+        Utilities.sleep(sleepTime);
+        continue;
+      }
+      
+      const errorDetail = response.getContentText();
+      Logger.log(`API Error (Status ${statusCode}): ${errorDetail}`);
+      throw new Error(`Gemini returned status ${statusCode}`);
+      
+    } catch (e) {
+      lastError = e;
+      Logger.log(`Catch Error on Attempt ${n + 1}: ${e.message}`);
+      // Wait before next attempt
+      Utilities.sleep(Math.pow(2, n) * 1000);
+    }
+  }
+
+  Logger.log(`--- AI Request Failed after 5 attempts ---`);
+  throw new Error(`Failed after 5 attempts. Last error: ${lastError.message}`);
+}
+
+/**
+ * Backward compatibility for sidebar calls.
+ */
+function askGemini(query) {
+  try {
+    const monthYear = new Date().toISOString().slice(0, 7);
+    return askCipherAI(query, '', monthYear);
+  } catch (e) {
+    Logger.log(`askGemini catch-all error: ${e.message}`);
+    return `ERROR: ${e.message}`;
+  }
+}
+
+/**
+ * Saves an AI suggestion to the 'AI Suggestions' sheet.
+ */
+function saveSuggestion_(type, suggestion, monthYear) {
+  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('AI Suggestions') || ss.insertSheet('AI Suggestions');
+
+  if (sheet.getLastRow() === 0) {
+    sheet.getRange('A1:D1')
+         .setValues([['Date', 'Month', 'Type', 'Suggestion']])
+         .setFontWeight('bold')
+         .setBackground('#e8eaf6');
+  }
+
+  const row = [new Date().toLocaleDateString(), monthYear, type, suggestion];
+  sheet.appendRow(row);
+  sheet.getRange(sheet.getLastRow(), 4).setWrap(true);
+  sheet.setColumnWidth(4, 400);
+}

@@ -1,0 +1,38 @@
+{
+  "sheet_identity": "ENTITY-YYYY-MM",
+  "frozen_rows": 3,
+  "frozen_cols": 1,
+  "controls": {
+    "year": {"cell": "B1", "label": "A1", "format": "NUMBER", "pattern": "0"},
+    "month": {"cell": "B2", "label": "A2", "format": "TEXT"},
+    "status": {"cell": "D1", "label": "C1", "format": "TEXT"},
+    "sync": {"cell": "D2", "label": "C2", "format": "CHECKBOX"}
+  },
+  "headers": {
+    "row": 3,
+    "columns": {
+      "A": "ENTITY",
+      "B": "PLANNED",
+      "C": "ACTUAL",
+      "D_AH": "1-31 (DAYS)"
+    },
+    "style": {
+      "bg": "#444444",
+      "text": "#FFFFFF",
+      "bold": true,
+      "align": "CENTER"
+    }
+  },
+  "sections": [
+    {"id": "INCOME", "label": "INCOME SOURCE", "color": "#1D9E75"},
+    {"id": "EXPENSE", "label": "MONTHLY EXPENSES", "color": "#D85A30"},
+    {"id": "SAVINGS", "label": "SAVINGS & INVESTMENTS", "color": "#185FA5"}
+  ],
+  "summary": {
+    "net_summary_label": "NET SUMMARY",
+    "rows": [
+      {"id": "CASH_FLOW", "label": "CASH FLOW", "formula_b": "SUM(INCOME) + SUM(EXPENSE)"},
+      {"id": "REMAINING", "label": "REMAINING", "formula_b": "CASH_FLOW + SUM(SAVINGS)"}
+    ]
+  }
+}
