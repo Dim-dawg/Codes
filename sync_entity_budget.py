@@ -275,8 +275,8 @@ def write_month_sheet(month_year: str, target_sheet_id: int = None, current_titl
             "account_type": normalize_account_type(profile),
         })
 
-    # Sort profiles by name (no category grouping)
-    enriched_profiles.sort(key=lambda x: x["name"])
+    # Sort profiles by category, then by name (for proper hierarchy)
+    enriched_profiles.sort(key=lambda x: (x["category_name"], x["name"]))
 
     sections = {
         "INCOME": [p for p in enriched_profiles if p["account_type"] == "INCOME"],
@@ -319,17 +319,28 @@ def write_month_sheet(month_year: str, target_sheet_id: int = None, current_titl
         section_start = current_row
         row_numbers = []
 
-        # 2. Add profiles directly (no category sub-headers)
-        for profile in sections[key]:
-            planned = budget_map.get(profile["id"], 0.0)
-            daily = [round(daily_actuals[profile["id"]].get(day, 0.0), 2) for day in range(1, last_day + 1)]
-            
-            # Profile Name
-            values.append([profile['name'], planned, ""] + daily)
-            row_numbers.append(current_row)
-            row_formats.append({"row": current_row, "color": None, "kind": "entity"})
-            formula_cells.append({"row": current_row, "col": 3, "formula": f"=SUM(D{current_row}:AH{current_row})"})
+        # 2. Group profiles in this section by category
+        cat_groups = defaultdict(list)
+        for p in sections[key]:
+            cat_groups[p["category_name"]].append(p)
+        
+        # 3. Iterate through categories and their profiles
+        for cat_name, profs in sorted(cat_groups.items()):
+            # Category Sub-header (e.g. Bank Fees)
+            values.append([cat_name.upper()] + [""] * (total_cols - 1))
+            row_formats.append({"row": current_row, "color": None, "kind": "category"})
             current_row += 1
+            
+            for profile in profs:
+                planned = budget_map.get(profile["id"], 0.0)
+                daily = [round(daily_actuals[profile["id"]].get(day, 0.0), 2) for day in range(1, last_day + 1)]
+                
+                # Profile Name
+                values.append([profile['name'], planned, ""] + daily)
+                row_numbers.append(current_row)
+                row_formats.append({"row": current_row, "color": None, "kind": "entity"})
+                formula_cells.append({"row": current_row, "col": 3, "formula": f"=SUM(D{current_row}:AH{current_row})"})
+                current_row += 1
 
         # 4. Section Total
         total_row = current_row
@@ -587,12 +598,6 @@ def build_format_requests(sheet_id: int, last_row: int, row_formats: list[dict[s
                     "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)",
                 }
             })
-            requests.append({
-                "mergeCells": {
-                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row_index + 1, "startColumnIndex": 1, "endColumnIndex": total_cols},
-                    "mergeType": "MERGE_ALL",
-                }
-            })
         elif kind == "total":
             color = hex_to_rgb(item["color"])
             requests.append({
@@ -653,6 +658,20 @@ def build_format_requests(sheet_id: int, last_row: int, row_formats: list[dict[s
                         }
                     },
                     "fields": "userEnteredFormat.backgroundColor",
+                }
+            })
+        elif kind == "category":
+            requests.append({
+                "repeatCell": {
+                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row_index + 1, "startColumnIndex": 0, "endColumnIndex": total_cols},
+                    "cell": {
+                        "userEnteredFormat": {
+                            "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9},
+                            "textFormat": {"bold": True, "italic": True},
+                            "horizontalAlignment": "LEFT",
+                        }
+                    },
+                    "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)",
                 }
             })
         elif kind == "entity" and item["row"] % 2 == 0:
