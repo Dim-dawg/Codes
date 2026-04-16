@@ -252,8 +252,8 @@ def write_month_sheet(month_year: str, target_sheet_id: int = None, current_titl
             "account_type": normalize_account_type(profile),
         })
 
-    # Sort profiles: Category first, then Name
-    enriched_profiles.sort(key=lambda x: (x["category_name"], x["name"]))
+    # Sort profiles by name (no category grouping)
+    enriched_profiles.sort(key=lambda x: x["name"])
 
     sections = {
         "INCOME": [p for p in enriched_profiles if p["account_type"] == "INCOME"],
