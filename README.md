@@ -60,9 +60,29 @@ Output:
   "worksheet_title": "ENTITY-2026-02",
   "worksheet_gid": 1349697541,
   "profiles": 13,
-  "rows_written": 25
+  "rows_written": 25,
+  "unlinked_transactions": 0
 }
 ```
+
+- `worksheet_title`: The Google Sheet tab name (ENTITY-YYYY-MM)
+- `worksheet_gid`: Google Sheets internal ID for the worksheet
+- `profiles`: Number of profiles with transactions in this month
+- `rows_written`: Total rows written to sheet (including headers, section totals, summary)
+- `unlinked_transactions`: Count of transactions without a profile_id (orphaned transactions)
+
+### Handling Unlinked Transactions
+
+If `unlinked_transactions` is greater than 0, it means there are transactions in your Supabase database that are not linked to any profile. These transactions are:
+- **Not displayed** on the budget sheet (no profile to associate with)
+- **Not included** in any calculations
+- **Tracked** and reported for visibility
+
+To resolve unlinked transactions:
+1. Log into your Supabase dashboard
+2. Query the `transactions` table for rows with NULL `profile_id`
+3. Either link them to a profile or delete them as appropriate
+4. Re-run the sync to verify all transactions are now accounted for
 
 ## Architecture
 
