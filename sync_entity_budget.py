@@ -120,13 +120,11 @@ def build_budget_map(profiles: list[dict[str, Any]], budgets: list[dict[str, Any
     return result
 
 
-def build_daily_actuals(transactions: list[dict[str, Any]]) -> tuple[dict[str, dict[int, float]], int]:
+def build_daily_actuals(transactions: list[dict[str, Any]]) -> dict[str, dict[int, float]]:
     result: dict[str, dict[int, float]] = defaultdict(lambda: defaultdict(float))
-    unlinked_count = 0
     for txn in transactions:
         profile_id = txn.get("profile_id")
         if not profile_id:
-            unlinked_count += 1
             continue
         day = int(str(txn["date"]).split("T")[0].split("-")[2])
         amount = float(txn.get("amount") or 0)
@@ -136,7 +134,7 @@ def build_daily_actuals(transactions: list[dict[str, Any]]) -> tuple[dict[str, d
         signed = abs(amount) if cat_type == "INCOME" else -abs(amount)
         
         result[profile_id][day] += signed
-    return result, unlinked_count
+    return result
 
 
 def get_sheets_service():
@@ -213,6 +211,26 @@ def column_letter(col: int) -> str:
     return result
 
 
+def get_unlinked_transactions(month_year: str) -> list[dict[str, Any]]:
+    """Retrieve all transactions without a profile_id for a given month."""
+    user_id = require_env("SUPABASE_USER_ID")
+    year, month = month_year.split("-")
+    last_day = calendar.monthrange(int(year), int(month))[1]
+    try:
+        return supabase_get(
+            "transactions",
+            {
+                "user_id": f"eq.{user_id}",
+                "profile_id": "is.null",
+                "and": f"(date.gte.{month_year}-01,date.lte.{month_year}-{last_day:02d})",
+                "select": "id,date,amount,type,category_id,category:categories(name,account_type)",
+                "order": "date.asc",
+            },
+        )
+    except Exception:
+        return []
+
+
 def write_month_sheet(month_year: str, target_sheet_id: int = None, current_title: str = None) -> dict[str, Any]:
     parsed = datetime.strptime(month_year, "%Y-%m")
     last_day = calendar.monthrange(parsed.year, parsed.month)[1]
@@ -235,12 +253,15 @@ def write_month_sheet(month_year: str, target_sheet_id: int = None, current_titl
     budgets = fetch_budgets(month_year)
     transactions = fetch_transactions(month_year)
     
+    # Track unlinked transactions for reporting
+    unlinked_transactions = get_unlinked_transactions(month_year)
+    
     # Only include profiles that have transactions for this month
     profile_ids_with_transactions = {t["profile_id"] for t in transactions if t.get("profile_id")}
     profiles = [p for p in profiles if p["id"] in profile_ids_with_transactions]
     
     budget_map = build_budget_map(profiles, budgets)
-    daily_actuals, unlinked_txn_count = build_daily_actuals(transactions)
+    daily_actuals = build_daily_actuals(transactions)
 
     enriched_profiles = []
     for profile in profiles:
@@ -384,12 +405,24 @@ def write_month_sheet(month_year: str, target_sheet_id: int = None, current_titl
 
     update_status(service, spreadsheet_id, sheet_title, "✅ Ready", sync_done=True)
 
+    # Format unlinked transaction details for output
+    unlinked_details = []
+    for txn in unlinked_transactions:
+        unlinked_details.append({
+            "id": txn["id"],
+            "date": txn["date"],
+            "amount": float(txn.get("amount") or 0),
+            "type": txn.get("type"),
+            "category": (txn.get("category") or {}).get("name", "Unknown"),
+        })
+
     return {
         "worksheet_title": sheet_title,
         "worksheet_gid": sheet_id,
         "profiles": len(enriched_profiles),
         "rows_written": len(values),
-        "unlinked_transactions": unlinked_txn_count,
+        "unlinked_transactions": len(unlinked_transactions),
+        "unlinked_details": unlinked_details if unlinked_details else None,
     }
 
 
