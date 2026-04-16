@@ -692,11 +692,39 @@ def main() -> int:
     load_dotenv()
     
     month_year = None
+    command = None
+    
     for arg in sys.argv[1:]:
         if "=" in arg:
             key, value = arg.split("=", 1)
             if key == "month":
                 month_year = value
+        else:
+            command = arg
+
+    # Handle diagnostic command to list unlinked transactions
+    if command == "unlinked":
+        if not month_year:
+            month_year = datetime.now().strftime("%Y-%m")
+        try:
+            unlinked = get_unlinked_transactions(month_year)
+            if unlinked:
+                print(f"\nUnlinked Transactions for {month_year}:")
+                print(f"{'Date':<12} {'Amount':>12} {'Type':<8} {'Category':<20} {'ID':<36}")
+                print("-" * 90)
+                for txn in unlinked:
+                    print(
+                        f"{txn['date']:<12} ${float(txn.get('amount') or 0):>11.2f} "
+                        f"{txn.get('type', 'unknown'):<8} "
+                        f"{(txn.get('category') or {}).get('name', 'Unknown'):<20} "
+                        f"{txn['id']:<36}"
+                    )
+            else:
+                print(f"✅ No unlinked transactions found for {month_year}")
+            return 0
+        except Exception as exc:
+            print(json.dumps({"ok": False, "error": str(exc)}, indent=2))
+            return 1
 
     if not month_year:
         try:
