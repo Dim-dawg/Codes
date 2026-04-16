@@ -116,3 +116,44 @@ To resolve unlinked transactions:
 - Simplified sheet structure to remove category sub-headers (flat profile list under sections)
 - Dynamic month-based day calculation for flexible date ranges
 - Profile filtering to show only those with transactions
+- Unlinked transaction detection and diagnostic reporting
+
+## Troubleshooting
+
+### Unlinked Transactions Not Appearing on Sheet
+
+**Issue:** Some transactions are missing from the budget sheet.
+
+**Cause:** Transactions without a `profile_id` (unlinked transactions) cannot be displayed since they belong to no account.
+
+**Solution:**
+1. Run the diagnostic: `python sync_entity_budget.py unlinked month=2026-02`
+2. For each transaction ID returned:
+   - Log into Supabase → `transactions` table
+   - Find the transaction by ID
+   - Set the `profile_id` field to the appropriate profile
+3. Re-run the sync: `python sync_entity_budget.py month=2026-02`
+
+### Zero Profiles Appearing
+
+**Cause:** The selected month has no transactions linked to any profiles.
+
+**Symptom:** Output shows `"profiles": 0`
+
+**Solution:**
+- Check if transactions exist in Supabase for the month
+- Verify transactions are linked to profiles (`profile_id` is not NULL)
+- Use the diagnostic to find unlinked transactions
+
+### Environment Variable Errors
+
+**Issue:** `Missing required env var: SUPABASE_USER_ID`
+
+**Solution:** Ensure your `.env` file includes all required variables:
+```
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+SUPABASE_USER_ID=your_user_uuid
+GOOGLE_SHEET_ID=your_google_sheet_id
+GOOGLE_SERVICE_ACCOUNT_FILE=/path/to/service-account-key.json
+```
