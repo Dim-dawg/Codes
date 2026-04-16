@@ -214,6 +214,8 @@ def column_letter(col: int) -> str:
 
 def write_month_sheet(month_year: str, target_sheet_id: int = None, current_title: str = None) -> dict[str, Any]:
     parsed = datetime.strptime(month_year, "%Y-%m")
+    last_day = calendar.monthrange(parsed.year, parsed.month)[1]
+    total_cols = 3 + last_day  # A, B, C + days
     spreadsheet_id = require_env("GOOGLE_SHEET_ID")
     service = get_sheets_service()
     
@@ -277,7 +279,7 @@ def write_month_sheet(month_year: str, target_sheet_id: int = None, current_titl
 
     values.append([BLUEPRINT["headers"]["columns"]["A"], 
                    BLUEPRINT["headers"]["columns"]["B"], 
-                   BLUEPRINT["headers"]["columns"]["C"]] + list(range(1, 32)))
+                   BLUEPRINT["headers"]["columns"]["C"]] + list(range(1, last_day + 1)))
 
     current_row = 4
     summary_refs: dict[str, int] = {}
@@ -298,13 +300,13 @@ def write_month_sheet(month_year: str, target_sheet_id: int = None, current_titl
         # 3. Iterate through categories
         for cat_name, profs in sorted(cat_groups.items()):
             # Category Sub-header (e.g. Bank Fees)
-            values.append([cat_name.upper()] + [""] * 33)
+            values.append([cat_name.upper()] + [""] * (total_cols - 1))
             row_formats.append({"row": current_row, "color": None, "kind": "category"})
             current_row += 1
             
             for profile in profs:
                 planned = budget_map.get(profile["id"], 0.0)
-                daily = [round(daily_actuals[profile["id"]].get(day, 0.0), 2) for day in range(1, 32)]
+                daily = [round(daily_actuals[profile["id"]].get(day, 0.0), 2) for day in range(1, last_day + 1)]
                 
                 # Indented Profile Name
                 display_name = f"   {profile['name']}" 
@@ -317,30 +319,30 @@ def write_month_sheet(month_year: str, target_sheet_id: int = None, current_titl
         # 4. Section Total
         total_row = current_row
         label_text = f"TOTAL {label}" if key != "SAVINGS" else "TOTAL SAVINGS & INVESTMENTS"
-        values.append([label_text, "", ""] + [""] * 31)
+        values.append([label_text, "", ""] + [""] * last_day)
         row_formats.append({"row": total_row, "color": color, "kind": "total"})
 
         if row_numbers:
             formula_cells.append({"row": total_row, "col": 2, "formula": f"=SUM(B{section_start}:B{total_row - 1})"})
             formula_cells.append({"row": total_row, "col": 3, "formula": f"=SUM(C{section_start}:C{total_row - 1})"})
-            for col in range(4, 35):
+            for col in range(4, 4 + last_day):
                 letter = column_letter(col)
                 formula_cells.append({"row": total_row, "col": col, "formula": f"=SUM({letter}{section_start}:{letter}{total_row - 1})"})
         summary_refs[key] = total_row
         current_row += 2
 
-    values.append([BLUEPRINT["summary"]["net_summary_label"]] + [""] * 33)
+    values.append([BLUEPRINT["summary"]["net_summary_label"]] + [""] * (total_cols - 1))
     row_formats.append({"row": current_row, "color": "#444444", "kind": "section"})
     current_row += 1
 
     cash_flow_row = current_row
-    values.append(["CASH FLOW", "", ""] + [""] * 31)
+    values.append(["CASH FLOW", "", ""] + [""] * last_day)
     row_formats.append({"row": current_row, "color": None, "kind": "summary"})
     formula_cells.append({"row": current_row, "col": 2, "formula": f"=B{summary_refs['INCOME']}+B{summary_refs['EXPENSE']}"})
     formula_cells.append({"row": current_row, "col": 3, "formula": f"=C{summary_refs['INCOME']}+C{summary_refs['EXPENSE']}"})
     current_row += 1
 
-    values.append(["REMAINING", "", ""] + [""] * 31)
+    values.append(["REMAINING", "", ""] + [""] * last_day)
     row_formats.append({"row": current_row, "color": None, "kind": "summary"})
     formula_cells.append({"row": current_row, "col": 2, "formula": f"=B{cash_flow_row}+B{summary_refs['SAVINGS']}"})
     formula_cells.append({"row": current_row, "col": 3, "formula": f"=C{cash_flow_row}+C{summary_refs['SAVINGS']}"})
@@ -367,7 +369,7 @@ def write_month_sheet(month_year: str, target_sheet_id: int = None, current_titl
             }
         })
 
-    batch_requests = build_format_requests(sheet_id, last_row, row_formats)
+    batch_requests = build_format_requests(sheet_id, last_row, row_formats, last_day, total_cols)
     
     # Rename sheet if title doesn't match the new month
     if effective_title != sheet_title:
@@ -396,7 +398,7 @@ def write_month_sheet(month_year: str, target_sheet_id: int = None, current_titl
     }
 
 
-def build_format_requests(sheet_id: int, last_row: int, row_formats: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def build_format_requests(sheet_id: int, last_row: int, row_formats: list[dict[str, Any]], last_day: int, total_cols: int) -> list[dict[str, Any]]:
     h_style = BLUEPRINT["headers"]["style"]
     requests = [
         {
@@ -478,7 +480,7 @@ def build_format_requests(sheet_id: int, last_row: int, row_formats: list[dict[s
         {
             "setBasicFilter": {
                 "filter": {
-                    "range": {"sheetId": sheet_id, "startRowIndex": 2, "endRowIndex": last_row, "startColumnIndex": 0, "endColumnIndex": 34}
+                    "range": {"sheetId": sheet_id, "startRowIndex": 2, "endRowIndex": last_row, "startColumnIndex": 0, "endColumnIndex": total_cols}
                 }
             }
         },
@@ -498,14 +500,14 @@ def build_format_requests(sheet_id: int, last_row: int, row_formats: list[dict[s
         },
         {
             "updateDimensionProperties": {
-                "range": {"sheetId": sheet_id, "dimension": "COLUMNS", "startIndex": 3, "endIndex": 34},
+                "range": {"sheetId": sheet_id, "dimension": "COLUMNS", "startIndex": 3, "endIndex": total_cols},
                 "properties": {"pixelSize": 42},
                 "fields": "pixelSize",
             }
         },
         {
             "repeatCell": {
-                "range": {"sheetId": sheet_id, "startRowIndex": 3, "endRowIndex": last_row, "startColumnIndex": 0, "endColumnIndex": 34},
+                "range": {"sheetId": sheet_id, "startRowIndex": 2, "endRowIndex": 3, "startColumnIndex": 0, "endColumnIndex": total_cols},
                 "cell": {
                     "userEnteredFormat": {
                         "verticalAlignment": "MIDDLE",
@@ -528,7 +530,7 @@ def build_format_requests(sheet_id: int, last_row: int, row_formats: list[dict[s
         },
         {
             "repeatCell": {
-                "range": {"sheetId": sheet_id, "startRowIndex": 3, "endRowIndex": last_row, "startColumnIndex": 1, "endColumnIndex": 34},
+                "range": {"sheetId": sheet_id, "startRowIndex": 3, "endRowIndex": last_row, "startColumnIndex": 1, "endColumnIndex": total_cols},
                 "cell": {
                     "userEnteredFormat": {
                         "horizontalAlignment": "CENTER",
@@ -546,7 +548,7 @@ def build_format_requests(sheet_id: int, last_row: int, row_formats: list[dict[s
             color = hex_to_rgb(item["color"])
             requests.append({
                 "repeatCell": {
-                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row_index + 1, "startColumnIndex": 0, "endColumnIndex": 34},
+                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row_index + 1, "startColumnIndex": 0, "endColumnIndex": total_cols},
                     "cell": {
                         "userEnteredFormat": {
                             "backgroundColor": color,
@@ -559,7 +561,7 @@ def build_format_requests(sheet_id: int, last_row: int, row_formats: list[dict[s
             })
             requests.append({
                 "mergeCells": {
-                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row_index + 1, "startColumnIndex": 1, "endColumnIndex": 34},
+                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row_index + 1, "startColumnIndex": 1, "endColumnIndex": total_cols},
                     "mergeType": "MERGE_ALL",
                 }
             })
@@ -567,7 +569,7 @@ def build_format_requests(sheet_id: int, last_row: int, row_formats: list[dict[s
             color = hex_to_rgb(item["color"])
             requests.append({
                 "repeatCell": {
-                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row_index + 1, "startColumnIndex": 0, "endColumnIndex": 34},
+                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row_index + 1, "startColumnIndex": 0, "endColumnIndex": total_cols},
                     "cell": {
                         "userEnteredFormat": {
                             "backgroundColor": color,
@@ -580,7 +582,7 @@ def build_format_requests(sheet_id: int, last_row: int, row_formats: list[dict[s
             })
             requests.append({
                 "repeatCell": {
-                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row_index + 1, "startColumnIndex": 1, "endColumnIndex": 34},
+                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row_index + 1, "startColumnIndex": 1, "endColumnIndex": total_cols},
                     "cell": {
                         "userEnteredFormat": {
                             "numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00;$(#,##0.00)"}
@@ -616,7 +618,7 @@ def build_format_requests(sheet_id: int, last_row: int, row_formats: list[dict[s
             })
             requests.append({
                 "repeatCell": {
-                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row_index + 1, "startColumnIndex": 3, "endColumnIndex": 34},
+                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row_index + 1, "startColumnIndex": 3, "endColumnIndex": total_cols},
                     "cell": {
                         "userEnteredFormat": {
                             "backgroundColor": {"red": 1, "green": 1, "blue": 1},
@@ -628,7 +630,7 @@ def build_format_requests(sheet_id: int, last_row: int, row_formats: list[dict[s
         elif kind == "category":
             requests.append({
                 "repeatCell": {
-                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row_index + 1, "startColumnIndex": 0, "endColumnIndex": 34},
+                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row_index + 1, "startColumnIndex": 0, "endColumnIndex": total_cols},
                     "cell": {
                         "userEnteredFormat": {
                             "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9},
@@ -641,14 +643,14 @@ def build_format_requests(sheet_id: int, last_row: int, row_formats: list[dict[s
             })
             requests.append({
                 "mergeCells": {
-                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row_index + 1, "startColumnIndex": 1, "endColumnIndex": 34},
+                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row_index + 1, "startColumnIndex": 1, "endColumnIndex": total_cols},
                     "mergeType": "MERGE_ALL",
                 }
             })
         elif kind == "entity" and item["row"] % 2 == 0:
             requests.append({
                 "repeatCell": {
-                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row_index + 1, "startColumnIndex": 0, "endColumnIndex": 34},
+                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row_index + 1, "startColumnIndex": 0, "endColumnIndex": total_cols},
                     "cell": {"userEnteredFormat": {"backgroundColor": {"red": 0.97, "green": 0.98, "blue": 0.98}}},
                     "fields": "userEnteredFormat.backgroundColor",
                 }
@@ -656,7 +658,7 @@ def build_format_requests(sheet_id: int, last_row: int, row_formats: list[dict[s
         if kind == "entity":
             requests.append({
                 "repeatCell": {
-                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row_index + 1, "startColumnIndex": 1, "endColumnIndex": 34},
+                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row_index + 1, "startColumnIndex": 1, "endColumnIndex": total_cols},
                     "cell": {
                         "userEnteredFormat": {
                             "numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00;$(#,##0.00)"}
