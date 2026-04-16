@@ -233,6 +233,11 @@ def write_month_sheet(month_year: str, target_sheet_id: int = None, current_titl
     profiles = fetch_profiles()
     budgets = fetch_budgets(month_year)
     transactions = fetch_transactions(month_year)
+    
+    # Only include profiles that have transactions for this month
+    profile_ids_with_transactions = {t["profile_id"] for t in transactions if t.get("profile_id")}
+    profiles = [p for p in profiles if p["id"] in profile_ids_with_transactions]
+    
     budget_map = build_budget_map(profiles, budgets)
     daily_actuals = build_daily_actuals(transactions)
 
