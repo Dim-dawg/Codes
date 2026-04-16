@@ -2,6 +2,7 @@ import calendar
 import json
 import os
 import sys
+import time
 from collections import defaultdict
 from datetime import datetime
 from typing import Any, Dict
@@ -687,13 +688,120 @@ def hex_to_rgb(value: str) -> dict[str, float]:
 def main() -> int:
     load_dotenv()
     
+    is_watch = "--watch" in sys.argv
     month_year = None
-    for arg in sys.argv[1:]:
-        if "=" in arg:
-            key, value = arg.split("=", 1)
-            if key == "month":
-                month_year = value
+    ai_agent = None
+    
+    try:
+        ai_agent = CipherAIAgent()
+    except Exception as e:
+        print(f"⚠️ AI Agent disabled: {e}")
 
+    if is_watch:
+        print("👀 Watcher Mode Active. Monitoring Budget (B1/B2/D2) and AI Chat...")
+        last_month_year = None
+        spreadsheet_id = require_env("GOOGLE_SHEET_ID")
+        service = get_sheets_service()
+        
+        while True:
+            try:
+                spreadsheet = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+                
+                # --- 1. HANDLE BUDGET SYNC ---
+                budget_sheets = [s for s in spreadsheet.get("sheets", []) 
+                                 if s.get("properties", {}).get("title", "").startswith("ENTITY-")]
+                
+                if budget_sheets:
+                    sheet_title = budget_sheets[0]["properties"]["title"]
+                    sheet_id = budget_sheets[0]["properties"]["sheetId"]
+                    
+                    res = service.spreadsheets().values().get(
+                        spreadsheetId=spreadsheet_id,
+                        range=f"'{sheet_title}'!B1:D2"
+                    ).execute()
+                    rows = res.get("values", [])
+                    
+                    if len(rows) >= 2:
+                        year = str(rows[0][0]).strip()
+                        month_name = str(rows[1][0]).strip()
+                        sync_checkbox = str(rows[1][2]).upper() == "TRUE" if len(rows[1]) >= 3 else False
+                        
+                        try:
+                            month_num = MONTH_NAMES.index(month_name) + 1
+                            current_month_year = f"{year}-{month_num:02d}"
+                            
+                            if current_month_year != last_month_year or sync_checkbox:
+                                write_month_sheet(current_month_year, target_sheet_id=sheet_id, current_title=sheet_title)
+                                last_month_year = current_month_year
+                        except ValueError: pass
+
+                # --- 2. HANDLE AI CHAT ---
+                if ai_agent:
+                    chat_sheet = "AI Chat"
+                    # Ensure chat sheet exists
+                    chat_exists = any(s.get("properties", {}).get("title") == chat_sheet for s in spreadsheet.get("sheets", []))
+                    if not chat_exists:
+                        print(f"➕ Creating '{chat_sheet}' tab...")
+                        # Create chat sheet and capture response
+                        add_res = service.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={
+                            "requests": [{"addSheet": {"properties": {"title": chat_sheet}}}]
+                        }).execute()
+                        new_sheet_id = add_res["replies"][0]["addSheet"]["properties"]["sheetId"]
+                        
+                        service.spreadsheets().values().update(
+                            spreadsheetId=spreadsheet_id, range=f"{chat_sheet}!A1:C1",
+                            valueInputOption="RAW", body={"values": [["Question", "Cipher AI Response", "Send? (Check to Ask)"]]}
+                        ).execute()
+                        
+                        # Add Checkbox to C2 using the fresh sheet ID
+                        service.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={
+                            "requests": [{
+                                "setDataValidation": {
+                                    "range": {"sheetId": new_sheet_id, 
+                                              "startRowIndex": 1, "endRowIndex": 2, "startColumnIndex": 2, "endColumnIndex": 3},
+                                    "rule": {"condition": {"type": "BOOLEAN"}}
+                                }
+                            }]
+                        }).execute()
+                        print(f"✅ Created '{chat_sheet}' tab with trigger checkbox.")
+
+                    # Read latest row including the trigger checkbox in C2
+                    res = service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=f"'{chat_sheet}'!A2:C2").execute()
+                    chat_row = res.get("values", [["", "", False]])
+                    
+                    question = str(chat_row[0][0]).strip() if chat_row and len(chat_row[0]) > 0 else ""
+                    # C2 is the trigger
+                    trigger_checkbox = str(chat_row[0][2]).upper() == "TRUE" if len(chat_row[0]) >= 3 else False
+
+                    if trigger_checkbox and question:
+                        print(f"🤖 AI processing question: {question}")
+                        
+                        # 1. Update status to 'Thinking...'
+                        service.spreadsheets().values().update(
+                            spreadsheetId=spreadsheet_id, range=f"'{chat_sheet}'!B2",
+                            valueInputOption="RAW", body={"values": [["🤔 Thinking..."]]}
+                        ).execute()
+                        
+                        # 2. Build context and get answer
+                        # Use the last synced month or current month
+                        context_month = last_month_year or datetime.now().strftime("%Y-%m")
+                        context = build_context_for_ai(context_month)
+                        answer = ai_agent.ask(question, context)
+                        
+                        # 3. Write answer and RESET checkbox to FALSE in one batch update for speed
+                        service.spreadsheets().values().update(
+                            spreadsheetId=spreadsheet_id, range=f"'{chat_sheet}'!B2:C2",
+                            valueInputOption="RAW", body={"values": [[answer, False]]}
+                        ).execute()
+                        print("✅ AI response delivered and trigger reset.")
+
+            except Exception as e:
+                print(f"⚠️ Watcher Error: {e}")
+            
+            time.sleep(5)
+        return 0
+
+    # Non-watch mode (standard pull)
     if not month_year:
         try:
             spreadsheet_id = require_env("GOOGLE_SHEET_ID")
