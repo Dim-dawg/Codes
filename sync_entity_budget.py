@@ -261,14 +261,14 @@ def write_month_sheet(month_year: str, target_sheet_id: int = None, current_titl
 
     # Row 1 & 2 Headers/Controls from BLUEPRINT
     c = BLUEPRINT["controls"]
-    row1 = [""] * 4
+    row1 = [""] * 34
     row1[ord(c["year"]["label"][0]) - 65] = "Year:"
     row1[ord(c["year"]["cell"][0]) - 65] = parsed.year
     row1[ord(c["status"]["label"][0]) - 65] = "Status:"
     row1[ord(c["status"]["cell"][0]) - 65] = "🔄 Processing..."
     values.append(row1)
 
-    row2 = [""] * 4
+    row2 = [""] * 34
     row2[ord(c["month"]["label"][0]) - 65] = "Month:"
     row2[ord(c["month"]["cell"][0]) - 65] = MONTH_NAMES[parsed.month - 1]
     row2[ord(c["sync"]["label"][0]) - 65] = "Sync Now:"
@@ -282,6 +282,7 @@ def write_month_sheet(month_year: str, target_sheet_id: int = None, current_titl
     current_row = 4
     summary_refs: dict[str, int] = {}
     for label, key, color in SECTION_CONFIG:
+        # 1. Main Section Header (e.g. INCOME SOURCE)
         values.append([label] + [""] * 33)
         row_formats.append({"row": current_row, "color": color, "kind": "section"})
         current_row += 1
@@ -289,17 +290,31 @@ def write_month_sheet(month_year: str, target_sheet_id: int = None, current_titl
         section_start = current_row
         row_numbers = []
 
-        for profile in sections[key]:
-            planned = budget_map.get(profile["id"], 0.0)
-            daily = [round(daily_actuals[profile["id"]].get(day, 0.0), 2) for day in range(1, 32)]
-            # Display formatted as "[Category] Name" for better alignment
-            display_name = f"[{profile['category_name'].upper()}] {profile['name']}"
-            values.append([display_name, planned, ""] + daily)
-            row_numbers.append(current_row)
-            row_formats.append({"row": current_row, "color": None, "kind": "entity"})
-            formula_cells.append({"row": current_row, "col": 3, "formula": f"=SUM(D{current_row}:AH{current_row})"})
+        # 2. Group profiles in this section by category
+        cat_groups = defaultdict(list)
+        for p in sections[key]:
+            cat_groups[p["category_name"]].append(p)
+        
+        # 3. Iterate through categories
+        for cat_name, profs in sorted(cat_groups.items()):
+            # Category Sub-header (e.g. Bank Fees)
+            values.append([cat_name.upper()] + [""] * 33)
+            row_formats.append({"row": current_row, "color": None, "kind": "category"})
             current_row += 1
+            
+            for profile in profs:
+                planned = budget_map.get(profile["id"], 0.0)
+                daily = [round(daily_actuals[profile["id"]].get(day, 0.0), 2) for day in range(1, 32)]
+                
+                # Indented Profile Name
+                display_name = f"   {profile['name']}" 
+                values.append([display_name, planned, ""] + daily)
+                row_numbers.append(current_row)
+                row_formats.append({"row": current_row, "color": None, "kind": "entity"})
+                formula_cells.append({"row": current_row, "col": 3, "formula": f"=SUM(D{current_row}:AH{current_row})"})
+                current_row += 1
 
+        # 4. Section Total
         total_row = current_row
         label_text = f"TOTAL {label}" if key != "SAVINGS" else "TOTAL SAVINGS & INVESTMENTS"
         values.append([label_text, "", ""] + [""] * 31)
@@ -608,6 +623,26 @@ def build_format_requests(sheet_id: int, last_row: int, row_formats: list[dict[s
                         }
                     },
                     "fields": "userEnteredFormat.backgroundColor",
+                }
+            })
+        elif kind == "category":
+            requests.append({
+                "repeatCell": {
+                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row_index + 1, "startColumnIndex": 0, "endColumnIndex": 34},
+                    "cell": {
+                        "userEnteredFormat": {
+                            "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9},
+                            "textFormat": {"bold": True, "italic": True},
+                            "horizontalAlignment": "LEFT",
+                        }
+                    },
+                    "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)",
+                }
+            })
+            requests.append({
+                "mergeCells": {
+                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row_index + 1, "startColumnIndex": 1, "endColumnIndex": 34},
+                    "mergeType": "MERGE_ALL",
                 }
             })
         elif kind == "entity" and item["row"] % 2 == 0:
