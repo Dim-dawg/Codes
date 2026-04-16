@@ -120,11 +120,13 @@ def build_budget_map(profiles: list[dict[str, Any]], budgets: list[dict[str, Any
     return result
 
 
-def build_daily_actuals(transactions: list[dict[str, Any]]) -> dict[str, dict[int, float]]:
+def build_daily_actuals(transactions: list[dict[str, Any]]) -> tuple[dict[str, dict[int, float]], int]:
     result: dict[str, dict[int, float]] = defaultdict(lambda: defaultdict(float))
+    unlinked_count = 0
     for txn in transactions:
         profile_id = txn.get("profile_id")
         if not profile_id:
+            unlinked_count += 1
             continue
         day = int(str(txn["date"]).split("T")[0].split("-")[2])
         amount = float(txn.get("amount") or 0)
@@ -134,7 +136,7 @@ def build_daily_actuals(transactions: list[dict[str, Any]]) -> dict[str, dict[in
         signed = abs(amount) if cat_type == "INCOME" else -abs(amount)
         
         result[profile_id][day] += signed
-    return result
+    return result, unlinked_count
 
 
 def get_sheets_service():
@@ -238,7 +240,7 @@ def write_month_sheet(month_year: str, target_sheet_id: int = None, current_titl
     profiles = [p for p in profiles if p["id"] in profile_ids_with_transactions]
     
     budget_map = build_budget_map(profiles, budgets)
-    daily_actuals = build_daily_actuals(transactions)
+    daily_actuals, unlinked_txn_count = build_daily_actuals(transactions)
 
     enriched_profiles = []
     for profile in profiles:
@@ -387,6 +389,7 @@ def write_month_sheet(month_year: str, target_sheet_id: int = None, current_titl
         "worksheet_gid": sheet_id,
         "profiles": len(enriched_profiles),
         "rows_written": len(values),
+        "unlinked_transactions": unlinked_txn_count,
     }
 
 
