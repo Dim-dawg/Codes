@@ -72,11 +72,34 @@ class SheetsService:
         for sheet in spreadsheet.get("sheets", []):
             props = sheet.get("properties", {})
             if props.get("title") == title:
+                sheet_id = props.get("sheetId")
                 self.service.spreadsheets().values().clear(
                     spreadsheetId=self.spreadsheet_id,
                     range=title,
                     body={},
                 ).execute()
+                
+                # Force minimum 35 columns to prevent grid out-of-bounds crash on old sheets
+                if props.get("gridProperties", {}).get("columnCount", 0) < 35:
+                    self.service.spreadsheets().batchUpdate(
+                        spreadsheetId=self.spreadsheet_id,
+                        body={
+                            "requests": [
+                                {
+                                    "updateSheetProperties": {
+                                        "properties": {
+                                            "sheetId": sheet_id,
+                                            "gridProperties": {
+                                                "columnCount": 35
+                                            }
+                                        },
+                                        "fields": "gridProperties.columnCount"
+                                    }
+                                }
+                            ]
+                        }
+                    ).execute()
+                    
                 return props
 
         reply = self.service.spreadsheets().batchUpdate(

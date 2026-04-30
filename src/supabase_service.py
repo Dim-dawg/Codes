@@ -44,12 +44,13 @@ class SupabaseService:
 
     def fetch_transactions(self, month_year: str) -> List[Dict[str, Any]]:
         year, month = month_year.split("-")
-        last_day = calendar.monthrange(int(year), int(month))[1]
+        next_month = int(month) + 1 if int(month) < 12 else 1
+        next_year = int(year) if int(month) < 12 else int(year) + 1
         return self._get(
             "transaction_sheet_view",
             {
                 "user_id": f"eq.{self.user_id}",
-                "and": f"(date.gte.{month_year}-01,date.lte.{month_year}-{last_day:02d})",
+                "and": f"(date.gte.{month_year}-01,date.lt.{next_year}-{next_month:02d}-01)",
                 "select": "id,date,amount,amount_signed,direction,profile_id,category_id,category_name,category_account_type,confidence_score,category_method,confidence_band,review_status",
                 "order": "date.asc",
             },
@@ -57,14 +58,15 @@ class SupabaseService:
 
     def get_unlinked_transactions(self, month_year: str) -> List[Dict[str, Any]]:
         year, month = month_year.split("-")
-        last_day = calendar.monthrange(int(year), int(month))[1]
+        next_month = int(month) + 1 if int(month) < 12 else 1
+        next_year = int(year) if int(month) < 12 else int(year) + 1
         try:
             return self._get(
                 "transaction_sheet_view",
                 {
                     "user_id": f"eq.{self.user_id}",
                     "profile_id": "is.null",
-                    "and": f"(date.gte.{month_year}-01,date.lte.{month_year}-{last_day:02d})",
+                    "and": f"(date.gte.{month_year}-01,date.lt.{next_year}-{next_month:02d}-01)",
                     "select": "id,date,amount,amount_signed,direction,category_id,category_name,category_account_type,confidence_score,category_method,review_status",
                     "order": "date.asc",
                 },

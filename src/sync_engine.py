@@ -2,6 +2,7 @@ import os
 import sys
 from datetime import datetime
 from collections import defaultdict
+from zoneinfo import ZoneInfo
 from .supabase_service import SupabaseService
 from .sheets_service import SheetsService
 from .validator import SyncValidator
@@ -46,14 +47,35 @@ class BudgetSyncApp:
 
             budget_map = {b["category_id"]: float(b.get("amount") or 0) for b in budgets}
             profile_daily_map = defaultdict(lambda: defaultdict(float))
+            uncategorized_profile = {"id": "uncategorized", "name": "UNCATEGORIZED TRANSACTIONS", "default_category": {"account_type": "EXPENSE"}}
+            has_uncategorized = False
+            
             for t in transactions:
                 p_id = t.get("profile_id")
-                if not p_id: continue
+                if not p_id:
+                    p_id = "uncategorized"
+                    has_uncategorized = True
+                
                 try:
-                    dt = datetime.fromisoformat(t["date"].replace("Z", "+00:00"))
-                    profile_daily_map[p_id][dt.day] += abs(float(t.get("amount_signed") or 0))
-                except:
-                    continue
+                    date_str = t["date"]
+                    # If the database returns a pure date (YYYY-MM-DD), use it literally to prevent time shifts
+                    if len(date_str) == 10:
+                        day_idx = int(date_str.split('-')[2])
+                    else:
+                        dt_utc = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+                        # Ensure timezone awareness before conversion to prevent system-local fallback
+                        if dt_utc.tzinfo is None:
+                            dt_utc = dt_utc.replace(tzinfo=ZoneInfo("UTC"))
+                        dt_local = dt_utc.astimezone(ZoneInfo("America/Belize"))
+                        day_idx = dt_local.day
+                except Exception as e:
+                    logger.warning(f"Failed to parse date for transaction {t.get('id')}: {e}. Falling back to day 1.")
+                    day_idx = 1
+                
+                profile_daily_map[p_id][day_idx] += abs(float(t.get("amount_signed") or 0))
+            
+            if has_uncategorized and not any(p["id"] == "uncategorized" for p in profiles):
+                profiles.append(uncategorized_profile)
 
             row_data_list = []
             
@@ -83,22 +105,22 @@ class BudgetSyncApp:
             })
 
             sections = [
-                {"type": "INCOME", "bg": COLORS["income_bg"]},
-                {"type": "EXPENSE", "bg": COLORS["expense_bg"]},
-                {"type": "SAVINGS", "bg": COLORS["savings_bg"]}
+                {"label": "INCOME", "types": ["INCOME"], "bg": COLORS["income_bg"]},
+                {"label": "EXPENSE", "types": ["EXPENSE", "LONG_TERM_LIAB"], "bg": COLORS["expense_bg"]},
+                {"label": "SAVINGS", "types": ["CURRENT_ASSET", "EQUITY"], "bg": COLORS["savings_bg"]}
             ]
             
             section_totals = {}
             letters = ["D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z","AA","AB","AC","AD","AE","AF","AG","AH"]
 
             for sec in sections:
-                type_name = sec["type"]
-                sec_profiles = [p for p in profiles if (p.get("default_category") or {}).get("account_type") == type_name]
+                label_name = sec["label"]
+                sec_profiles = [p for p in profiles if (p.get("default_category") or {}).get("account_type") in sec["types"]]
                 
                 # Section Header
                 row_data_list.append({
                     "values": [{
-                        "userEnteredValue": {"stringValue": f"--- {type_name} ---"},
+                        "userEnteredValue": {"stringValue": f"--- {label_name} ---"},
                         "userEnteredFormat": {
                             "backgroundColor": COLORS["section_hdr"],
                             "textFormat": {"bold": True, "foregroundColor": COLORS["accent_gold"]}
@@ -127,14 +149,14 @@ class BudgetSyncApp:
                 
                 end_idx = len(row_data_list)
                 total_row_idx = len(row_data_list) + 1
-                section_totals[type_name] = total_row_idx
+                section_totals[label_name] = total_row_idx
                 
                 # Safe SUM formula for section totals
                 sum_b = f"=SUM(B{start_idx}:B{end_idx})" if start_idx <= end_idx else "=0"
                 sum_c = f"=SUM(C{start_idx}:C{end_idx})" if start_idx <= end_idx else "=0"
                 
                 sub_cells = [
-                    {"userEnteredValue": {"stringValue": f"TOTAL {type_name}"}, "userEnteredFormat": {"backgroundColor": COLORS["total_row"], "textFormat": {"bold": True, "foregroundColor": COLORS["accent_cyan"]}}},
+                    {"userEnteredValue": {"stringValue": f"TOTAL {label_name}"}, "userEnteredFormat": {"backgroundColor": COLORS["total_row"], "textFormat": {"bold": True, "foregroundColor": COLORS["accent_cyan"]}}},
                     {"userEnteredValue": {"formulaValue": sum_b}, "userEnteredFormat": {"backgroundColor": COLORS["total_row"], "numberFormat": {"type": "CURRENCY", "pattern": '[$BZ$]#,##0.00'}, "textFormat": {"bold": True, "foregroundColor": COLORS["accent_cyan"]}}},
                     {"userEnteredValue": {"formulaValue": sum_c}, "userEnteredFormat": {"backgroundColor": COLORS["total_row"], "numberFormat": {"type": "CURRENCY", "pattern": '[$BZ$]#,##0.00'}, "textFormat": {"bold": True, "foregroundColor": COLORS["accent_cyan"]}}}
                 ]
@@ -148,7 +170,7 @@ class BudgetSyncApp:
             # Grand Summary
             row_data_list.append({"values": [{"userEnteredValue": {"stringValue": "FINANCIAL PERFORMANCE SUMMARY"}, "userEnteredFormat": {"backgroundColor": COLORS["section_hdr"], "textFormat": {"bold": True, "foregroundColor": COLORS["accent_gold"]}}}]})
             
-            for label, row_idx in [("Total Monthly Income", section_totals.get("INCOME")), ("Total Monthly Expenses", section_totals.get("EXPENSE")), ("Total Monthly Savings", section_totals.get("SAVINGS"))]:
+            for label, row_idx in [("TOTAL INCOME", section_totals.get("INCOME")), ("TOTAL EXPENSES", section_totals.get("EXPENSE")), ("TOTAL SAVINGS", section_totals.get("SAVINGS"))]:
                 val_dict = {"formulaValue": f"=C{row_idx}"} if row_idx else {"numberValue": 0}
                 row_data_list.append({"values": [
                     {"userEnteredValue": {"stringValue": label}, "userEnteredFormat": {"backgroundColor": COLORS["bg_dark"], "textFormat": {"foregroundColor": COLORS["text_white"]}}},
@@ -176,8 +198,20 @@ class BudgetSyncApp:
             sheet_id = sheet_props["sheetId"]
             self.sheets.write_rows(sheet_id, row_data_list)
             
-            # Additional Formatting (Freeze & Widths)
+            # Additional Formatting (Theme, Freeze & Widths)
             self.sheets.batch_update([
+                {
+                    "repeatCell": {
+                        "range": {"sheetId": sheet_id},
+                        "cell": {
+                            "userEnteredFormat": {
+                                "backgroundColor": COLORS["bg_dark"],
+                                "textFormat": {"foregroundColor": COLORS["text_white"]}
+                            }
+                        },
+                        "fields": "userEnteredFormat(backgroundColor,textFormat)"
+                    }
+                },
                 {
                     "updateSheetProperties": {
                         "properties": {

@@ -144,4 +144,4 @@ app.mount("/", StaticFiles(directory=DASHBOARD_DIR), name="dashboard")
 
 if __name__ == "__main__":
     logger.info("🚀 Starting Cipher Money Neural Hub on http://0.0.0.0:8000")
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="warning")
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, log_level="warning")
