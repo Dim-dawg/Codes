@@ -271,7 +271,7 @@ function fillDailyTransactions_(sheet, monthYear, sectionRows) {
     const key = `${targetRow},${col}`;
     if (!cellData[key]) cellData[key] = [];
 
-    const signedAmount = (t.type === 'expense') ? -Math.abs(t.amount) : Math.abs(t.amount);
+    const signedAmount = Number(t.amount_signed != null ? t.amount_signed : t.amount) || 0;
     cellData[key].push(signedAmount);
   });
 
@@ -368,8 +368,8 @@ function createTransactionExportSheet_(monthYear) {
   profiles.forEach(p => (profileMap[p.id] = p.name));
 
   // Headers
-  sheet.getRange(1, 1, 1, 5)
-    .setValues([['Date', 'Description', 'Profile', 'Amount', 'Type']])
+  sheet.getRange(1, 1, 1, 9)
+    .setValues([['Date', 'Description', 'Profile', 'Category', 'Confidence', 'Method', 'Review', 'Amount', 'Direction']])
     .setFontWeight('bold')
     .setBackground('#4361ee')
     .setFontColor('#ffffff');
@@ -381,17 +381,22 @@ function createTransactionExportSheet_(monthYear) {
       t.date.split('T')[0],
       t.description || '',
       profileMap[t.profile_id],
+      t.category_name || '',
+      formatConfidence_(t.confidence_score),
+      t.category_method || '',
+      t.review_status || '',
       t.amount,
-      t.type
+      t.direction || ''
     ]);
 
   if (rows.length) {
-    sheet.getRange(2, 1, rows.length, 5).setValues(rows);
-    sheet.getRange(2, 4, rows.length, 1).setNumberFormat('$#,##0.00;$(#,##0.00)');
+    sheet.getRange(2, 1, rows.length, 9).setValues(rows);
+    sheet.getRange(2, 8, rows.length, 1).setNumberFormat('$#,##0.00;$(#,##0.00)');
+    applyConfidenceFormatting_(sheet, rows.length, 5);
   }
 
   sheet.setFrozenRows(1);
-  sheet.autoResizeColumns(1, 5);
+  sheet.autoResizeColumns(1, 9);
 
   console.log(`✅ Exported ${rows.length} transactions`);
 }

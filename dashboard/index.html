@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cipher Money | Neural Hub</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+    <canvas id="three-canvas"></canvas>
+
+    <div id="app">
+        <main class="immersive-shell">
+            <section class="panel-left">
+                <header class="hub-header">
+                    <div class="logo">
+                        <div class="logo-icon"></div>
+                        <h1 class="logo-text">Cipher<span>Money</span></h1>
+                    </div>
+                </header>
+
+                <div class="ai-core-container">
+                    <div id="ai-core-portal"></div>
+                    <div class="ai-status">
+                        <div class="status-pulse"></div>
+                        <span>Neural Link Active</span>
+                    </div>
+                </div>
+
+                <!-- MONTH SELECTOR -->
+                <div class="month-selector-wrap">
+                    <label>Active Timeline</label>
+                    <input type="month" id="globalMonth" value="2025-02">
+                </div>
+
+                <nav class="hub-tabs">
+                    <button class="tab-btn active" data-tab="chat">Intelligence</button>
+                    <button class="tab-btn" data-tab="summary">Profile Summary</button>
+                    <button class="tab-btn" data-tab="goals">Targets</button>
+                </nav>
+
+                <div class="hub-stats">
+                    <div class="quick-stat">
+                        <label>Income</label>
+                        <span id="incomeVal" class="pos">$0</span>
+                    </div>
+                    <div class="quick-stat">
+                        <label>Expenses</label>
+                        <span id="expenseVal" class="neg">$0</span>
+                    </div>
+                    <div class="quick-stat">
+                        <label>Net Delta</label>
+                        <span id="healthVal">$0</span>
+                    </div>
+                </div>
+            </section>
+
+            <section class="panel-right">
+                <div class="content-viewport">
+                    <div id="panel-chat" class="tab-panel active">
+                        <div class="chat-header">
+                            <h2>Neural Chat Agent</h2>
+                            <p>Analyzing datasets for <span class="active-month-label">...</span></p>
+                        </div>
+                        <div id="chat-messages" class="messages-container"></div>
+                        <div class="chat-input-wrap">
+                            <input type="text" id="userInput" placeholder="Ask Cipher AI anything...">
+                            <button id="sendBtn">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="panel-summary" class="tab-panel">
+                        <div class="view-header">
+                            <h2>Profile Summary</h2>
+                            <p>Visualizing budget performance for <span class="active-month-label">...</span></p>
+                        </div>
+                        <div class="summary-grid" id="summary-container"></div>
+                    </div>
+
+                    <div id="panel-goals" class="tab-panel">
+                        <div class="view-header">
+                            <h2>Savings Targets</h2>
+                        </div>
+                        <div class="goals-grid" id="goals-container"></div>
+                    </div>
+                </div>
+
+                <footer class="hub-footer">
+                    <button id="syncBtn" class="sync-glow-btn">
+                        <span class="icon">✨</span> TRIGGER ATOMIC SYNC
+                    </button>
+                    <div class="sync-monitor">
+                        <span class="dot"></span> All Formulas Verified
+                    </div>
+                </footer>
+            </section>
+        </main>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>

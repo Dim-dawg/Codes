@@ -41,4 +41,4 @@ This document defines the layout and formatting for the monthly budget sheets ge
 ## 3. Data Source
 - **Profiles:** Fetched from `public.profiles`.
 - **Budgets:** Fetched from `public.budgets` for the specific `month` string (YYYY-MM).
-- **Transactions:** Fetched from `public.transactions` filtered by date range.
+- **Transactions:** Fetched from `public.transaction_sheet_view` filtered by date range. Category display must come from the latest categorization decision fields (`category_name`, `confidence_score`, `category_method`, `review_status`), not from `public.transactions.category`.

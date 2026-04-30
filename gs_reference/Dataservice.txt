@@ -6,7 +6,9 @@
  * CLASSIFICATION: Categories (via default_category_id)
  *
  * Uses the linked Google Sheet as the profile source of truth.
- * Supabase is still used for transactions, budgets, and goals.
+ * Supabase is still used for budgets and goals.
+ * Transactions are read through transaction_sheet_view so category metadata
+ * comes from categorization_decisions, not transactions.category.
  * ============================================================
  */
 
@@ -279,8 +281,8 @@ function getTransactionsByMonth(monthYear) {
   const endDateStr = Utilities.formatDate(endDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
 
   const result = supabaseFetch_(
-    'transactions',
-    `?user_id=eq.${creds.userId}&date=gte.${startDate}&date=lte.${endDateStr}&select=id,date,description,amount,type,profile_id,category_id&order=date.asc`,
+    'transaction_sheet_view',
+    `?user_id=eq.${creds.userId}&date=gte.${startDate}&date=lte.${endDateStr}&select=id,date,description,amount,amount_signed,direction,legacy_type,profile_id,category_id,category_name,category_account_type,confidence_score,category_method,confidence_band,review_status,decision_reason,decision_created_at,entity_name&order=date.asc`,
     'GET',
     null
   );
@@ -301,8 +303,8 @@ function getTransactionsByProfile(profileId) {
   console.log(`Fetching transactions for profile ${profileId}`);
 
   const result = supabaseFetch_(
-    'transactions',
-    `?user_id=eq.${creds.userId}&profile_id=eq.${profileId}&select=id,date,description,amount,type&order=date.desc&limit=50`,
+    'transaction_sheet_view',
+    `?user_id=eq.${creds.userId}&profile_id=eq.${profileId}&select=id,date,description,amount,amount_signed,direction,category_name,confidence_score,category_method,confidence_band,review_status,decision_reason&order=date.desc&limit=50`,
     'GET',
     null
   );
@@ -417,7 +419,7 @@ function buildActualMap(monthYear) {
       return;
     }
 
-    const amt = Math.abs(Number(t.amount) || 0);
+    const amt = Math.abs(Number(t.amount_signed != null ? t.amount_signed : t.amount) || 0);
     result[profileName] = (result[profileName] || 0) + amt;
   });
 
@@ -474,26 +476,53 @@ function syncTransactionLogSheet(monthYear) {
       t.date.split('T')[0],
       t.description,
       profileMap[t.profile_id],
-      t.category || '',
+      t.category_name || '',
+      formatConfidence_(t.confidence_score),
+      t.category_method || '',
+      t.review_status || '',
       t.amount,
-      t.type
+      t.direction || '',
+      t.entity_name || '',
+      t.decision_reason || ''
     ]);
 
   sheet.clear();
-  sheet.getRange(1, 1, 1, 6)
-    .setValues([['Date', 'Description', 'Profile', 'Category', 'Amount', 'Type']])
+  sheet.getRange(1, 1, 1, 11)
+    .setValues([['Date', 'Description', 'Profile', 'Category', 'Confidence', 'Method', 'Review', 'Amount', 'Direction', 'Entity', 'Reason']])
     .setFontWeight('bold')
     .setBackground('#4361ee')
     .setFontColor('#ffffff');
 
   if (rows.length) {
-    sheet.getRange(2, 1, rows.length, 6).setValues(rows);
-    sheet.getRange(2, 5, rows.length, 1).setNumberFormat('$#,##0.00;$(#,##0.00)');
+    sheet.getRange(2, 1, rows.length, 11).setValues(rows);
+    sheet.getRange(2, 8, rows.length, 1).setNumberFormat('$#,##0.00;$(#,##0.00)');
+    applyConfidenceFormatting_(sheet, rows.length, 5);
   }
 
   sheet.setFrozenRows(1);
-  sheet.autoResizeColumns(1, 6);
+  sheet.autoResizeColumns(1, 11);
   console.log(`Synced ${rows.length} rows`);
+}
+
+function formatConfidence_(value) {
+  if (value === '' || value == null) return '';
+  return `${Math.round(Number(value) * 100)}%`;
+}
+
+function applyConfidenceFormatting_(sheet, rowCount, confidenceColumn) {
+  if (!rowCount) return;
+
+  const values = sheet.getRange(2, confidenceColumn, rowCount, 1).getValues();
+  const colors = values.map(row => {
+    const text = String(row[0] || '').replace('%', '');
+    const score = Number(text);
+    if (!score) return ['#f1f3f4'];
+    if (score >= 85) return ['#d9ead3'];
+    if (score >= 60) return ['#fff2cc'];
+    return ['#f4cccc'];
+  });
+
+  sheet.getRange(2, confidenceColumn, rowCount, 1).setBackgrounds(colors);
 }
 
 /**
